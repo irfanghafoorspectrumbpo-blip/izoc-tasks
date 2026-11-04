@@ -178,3 +178,6 @@ dialog label { display: flex; flex-direction: column; gap: 5px; font-size: 12px;
 .total-row td { font-weight: 700; background: #f3f0ff; }
 .archived-table td { color: var(--muted); }
 .invite-form { margin: 0 0 12px; } .invite-form input[type=email] { min-width: 240px; }
+
+.logo-img { width: 72px; height: 72px; object-fit: contain; display: block; margin: 0 auto 10px; filter: drop-shadow(0 8px 14px rgba(30,35,64,.18)); }
+.logo-img.sm { width: 36px; height: 36px; margin: 0 10px 0 0; display: inline-block; }
