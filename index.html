@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Izoc Solution – Task Tracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css?v=3" />
+</head>
+<body>
+  <div class="bg-orbs"><span></span><span></span><span></span></div>
+
+  <!-- ========== AUTH SCREEN ========== -->
+  <section id="authScreen" class="screen hidden">
+    <div class="auth-card glass">
+      <div class="logo3d">IZ</div>
+      <h1>Izoc Task Tracker</h1>
+      <p class="muted" id="authSubtitle">Sign in to continue</p>
+      <form id="authForm">
+        <input id="authName" type="text" placeholder="Full name" class="hidden" />
+        <input id="authPhone" type="tel" placeholder="Phone number" class="hidden" />
+        <input id="authEmpId" type="text" placeholder="Employee ID" class="hidden" />
+        <input id="authEmail" type="email" placeholder="Email" required />
+        <input id="authPass" type="password" placeholder="Password (min 6 characters)" required minlength="6" />
+        <button type="submit" id="authBtn">Sign in</button>
+      </form>
+      <p class="small">
+        <a href="#" id="toggleAuth">New here? Create an account</a> ·
+        <a href="#" id="forgotPass">Forgot password?</a>
+      </p>
+      <p id="authMsg" class="msg"></p>
+    </div>
+  </section>
+
+  <!-- ========== PENDING SCREEN ========== -->
+  <section id="pendingScreen" class="screen hidden">
+    <div class="auth-card glass">
+      <div class="logo3d">⏳</div>
+      <h2>Waiting for approval</h2>
+      <p class="muted">Your account is created. Ask your Senior Supervisor to approve you and set your access.</p>
+      <button class="secondary" id="pendingLogout">Sign out</button>
+    </div>
+  </section>
+
+  <!-- ========== APP ========== -->
+  <section id="appScreen" class="hidden">
+    <header class="topbar glass">
+      <div class="brand"><span class="logo3d sm">IZ</span> Izoc Task Tracker</div>
+      <nav id="tabs">
+        <button data-tab="tasks" class="tab active">Pending Tasks</button>
+        <button data-tab="completed" class="tab">Completed</button>
+        <button data-tab="dashboard" class="tab">Dashboard</button>
+        <button data-tab="projects" class="tab staff-only">Projects</button>
+        <button data-tab="team" class="tab senior-only">Team</button>
+      </nav>
+      <div class="user"><span id="whoami"></span> <button class="secondary small-btn" id="logoutBtn">Sign out</button></div>
+    </header>
+
+    <!-- shared filters -->
+    <div class="toolbar glass" id="taskToolbar">
+      <button id="newTaskBtn" class="staff-only">+ New task</button>
+      <select id="fProject"><option value="">All projects</option></select>
+      <select id="fPerson" class="staff-only"><option value="">All people</option></select>
+      <select id="fStatus">
+        <option value="">All open statuses</option>
+        <option>Not Started</option><option>In Progress</option><option>On Hold</option>
+      </select>
+      <label class="small">From <input type="date" id="fFrom" /></label>
+      <label class="small">To <input type="date" id="fTo" /></label>
+      <button class="secondary" id="exportBtn">Export CSV</button>
+    </div>
+
+    <!-- PENDING TASKS TAB -->
+    <main id="tab-tasks" class="tabpane">
+      <div class="table-wrap glass">
+        <table id="taskTable">
+          <thead>
+            <tr>
+              <th>ID</th><th>Task</th><th>Project</th><th>Assigned to</th><th>Priority</th><th>Due</th>
+              <th>Status</th><th>Assigned</th><th>Started</th><th>Time so far</th><th>Actions</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p id="taskEmpty" class="muted empty hidden">No pending tasks. 🎉</p>
+    </main>
+
+    <!-- COMPLETED TAB -->
+    <main id="tab-completed" class="tabpane hidden">
+      <div class="table-wrap glass">
+        <table id="doneTable">
+          <thead>
+            <tr>
+              <th>ID</th><th>Task</th><th>Project</th><th>Completed by</th><th>Due</th>
+              <th>Assigned</th><th>Started</th><th>Completed</th><th>Time taken</th><th>On time?</th><th>Actions</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p id="doneEmpty" class="muted empty hidden">No completed tasks for these filters.</p>
+    </main>
+
+    <!-- DASHBOARD TAB -->
+    <main id="tab-dashboard" class="tabpane hidden">
+      <div id="revenuePanel" class="staff-only"></div>
+      <h3 class="staff-only">Tasks</h3>
+      <div class="cards" id="kpis"></div>
+      <h3 class="staff-only">By person</h3>
+      <div class="table-wrap glass staff-only"><table id="byPerson"><thead><tr>
+        <th>Person</th><th>Designation</th><th>Supervisor</th><th>Not started</th><th>In progress</th><th>On hold</th>
+        <th>Completed (7 days)</th><th>Avg time / task</th><th>Overdue</th></tr></thead><tbody></tbody></table></div>
+      <h3>By project</h3>
+      <div class="table-wrap glass"><table id="byProject"><thead><tr>
+        <th>Project</th><th>Total</th><th>Open</th><th>Completed</th><th>Overdue</th><th>Total time logged</th></tr></thead><tbody></tbody></table></div>
+      <h3>Overdue tasks</h3>
+      <div class="table-wrap glass"><table id="overdueTable"><thead><tr>
+        <th>Task</th><th>Project</th><th>Assigned to</th><th>Due</th><th>Status</th></tr></thead><tbody></tbody></table></div>
+    </main>
+
+    <!-- PROJECTS TAB -->
+    <main id="tab-projects" class="tabpane hidden">
+      <div class="section-head">
+        <h3>Current projects</h3>
+        <button id="newProjectBtn">+ Add project</button>
+      </div>
+      <div class="table-wrap glass"><table id="activeProjTable"><thead><tr>
+        <th>Client Name</th><th>Project Title</th><th>Brand Name</th><th>LLC Name</th><th>Project Type</th>
+        <th>Revenue ($)</th><th>Managed by</th><th>Open tasks</th><th>Actions</th></tr></thead><tbody></tbody></table></div>
+      <div class="section-head"><h3>Archived projects</h3><span class="muted small">Ended services · not counted in total revenue</span></div>
+      <div class="table-wrap glass"><table id="archivedProjTable" class="archived-table"><thead><tr>
+        <th>Client Name</th><th>Project Title</th><th>Brand Name</th><th>LLC Name</th><th>Project Type</th>
+        <th>Revenue ($)</th><th>Managed by</th><th>Actions</th></tr></thead><tbody></tbody></table></div>
+    </main>
+
+    <!-- TEAM TAB -->
+    <main id="tab-team" class="tabpane hidden">
+      <div class="section-head"><h3>Pending approval</h3><span class="muted small">New sign-ups appear here</span></div>
+      <div class="table-wrap glass"><table id="pendingTable"><thead><tr>
+        <th>Name</th><th>Email</th><th>Phone</th><th>Employee ID</th><th>Signed up</th><th>Approve as</th><th></th></tr></thead><tbody></tbody></table></div>
+      <p class="small muted legend"><b>Designation</b> is the job title. <b>Access</b> decides what they can see:
+        <b>Senior</b> = everything · <b>Supervisor</b> = their own team's tasks, projects &amp; dashboard · <b>Officer</b> = only their own tasks &amp; dashboard.</p>
+      <div class="section-head"><h3>Team</h3></div>
+      <div class="table-wrap glass"><table id="teamTable"><thead><tr>
+        <th>Name</th><th>Email</th><th>Phone</th><th>Employee ID</th><th>Designation</th><th>Access</th><th>Supervisor</th><th></th></tr></thead><tbody></tbody></table></div>
+    </main>
+  </section>
+
+  <!-- ========== TASK MODAL ========== -->
+  <dialog id="taskModal" class="glass">
+    <form id="taskForm" method="dialog">
+      <h3 id="taskModalTitle">New task</h3>
+      <label>Title <input id="tTitle" required /></label>
+      <label>Description <textarea id="tDesc" rows="3"></textarea></label>
+      <label>Project <select id="tProject" required></select></label>
+      <label>Assign to <select id="tAssignee" required></select></label>
+      <div class="row">
+        <label>Priority <select id="tPriority"><option>High</option><option selected>Medium</option><option>Low</option></select></label>
+        <label>Due date <input type="date" id="tDue" /></label>
+      </div>
+      <label>Notes <textarea id="tNotes" rows="2"></textarea></label>
+      <div class="row end">
+        <button type="button" class="secondary" id="taskCancel">Cancel</button>
+        <button type="submit" id="taskSave">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- ========== PROJECT MODAL ========== -->
+  <dialog id="projectModal" class="glass">
+    <form id="projectForm" method="dialog">
+      <h3 id="projectModalTitle">New project</h3>
+      <label>Client Name <input id="pClient" list="clientList" required placeholder="Type a new client or pick an existing one" /></label>
+      <datalist id="clientList"></datalist>
+      <label>Project title <input id="pName" required /></label>
+      <div class="row">
+        <label>Brand Name <input id="pBrand" /></label>
+        <label>LLC Name <input id="pLlc" /></label>
+      </div>
+      <div class="row">
+        <label>Project Type <select id="pType"><option value="">– select –</option><option>Half Time</option><option>Full Time</option></select></label>
+        <label>Project Revenue ($) <input id="pRevenue" type="number" min="0" step="0.01" placeholder="0.00" /></label>
+      </div>
+      <label>Managed by (supervisor) <select id="pManager"></select></label>
+      <p id="clientLimitMsg" class="msg small"></p>
+      <div class="row end">
+        <button type="button" class="secondary" id="projectCancel">Cancel</button>
+        <button type="submit">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- ========== HISTORY MODAL ========== -->
+  <dialog id="historyModal" class="glass">
+    <h3 id="historyTitle">History</h3>
+    <ul id="historyList" class="list"></ul>
+    <div class="row end"><button class="secondary" id="historyClose">Close</button></div>
+  </dialog>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script type="module" src="app.js?v=4"></script>
+</body>
+</html>

@@ -1,0 +1,60 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn()  { return request.auth != null; }
+    function myRole()    { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role; }
+    function isSenior()  { return signedIn() && myRole() == 'senior'; }
+    function isSup()     { return signedIn() && myRole() == 'supervisor'; }
+    function isStaff()   { return isSenior() || isSup(); }
+    function isActive()  { return signedIn() && myRole() in ['senior', 'supervisor', 'member']; }
+
+    // People: anyone can create their own profile, but only as "pending".
+    // Only the Senior Supervisor can approve, change roles, or set supervisors.
+    match /users/{uid} {
+      allow read: if isActive() || (signedIn() && request.auth.uid == uid);
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.role == 'pending'
+        && request.resource.data.keys().hasOnly(['name', 'email', 'role', 'supervisorId', 'phone', 'employeeId', 'designation', 'createdAt']);
+      allow update, delete: if isSenior();
+    }
+
+    // Projects: everyone approved can see them; supervisors add/archive; senior deletes.
+    match /projects/{pid} {
+      allow read: if isActive();
+      allow create, update: if isStaff();
+      allow delete: if isSenior();
+    }
+
+    // Project business details (client, brand, LLC, type, revenue): supervisors and senior only.
+    match /projectDetails/{pid} {
+      allow read, create, update: if isStaff();
+      allow delete: if isSenior();
+    }
+
+    // Tasks
+    match /tasks/{tid} {
+      allow read: if isSenior()
+        || (isSup() && resource.data.supervisorId == request.auth.uid)
+        || (isActive() && resource.data.assigneeId == request.auth.uid);
+
+      // Senior assigns to anyone; a supervisor only to their own team (supervisorId = themself).
+      allow create: if isStaff()
+        && request.resource.data.assignedById == request.auth.uid
+        && request.resource.data.status == 'Not Started'
+        && (isSenior() || request.resource.data.supervisorId == request.auth.uid);
+
+      // Senior edits anything; a supervisor edits their team's tasks;
+      // the person doing the task can only change status, timing and notes.
+      allow update: if isSenior()
+        || (isSup() && resource.data.supervisorId == request.auth.uid
+                    && request.resource.data.supervisorId == request.auth.uid)
+        || (isActive() && resource.data.assigneeId == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['status', 'notes', 'startedAt', 'completedAt', 'workMs',
+                           'lastResumeAt', 'history', 'updatedAt']));
+
+      allow delete: if isSenior() || (isSup() && resource.data.supervisorId == request.auth.uid);
+    }
+  }
+}
