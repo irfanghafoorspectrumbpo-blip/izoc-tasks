@@ -23,8 +23,12 @@ service cloud.firestore {
       allow read: if isActive() || (signedIn() && request.auth.uid == uid);
       allow create: if signedIn() && request.auth.uid == uid
         && (request.resource.data.role == 'pending' || matchesInvite())
-        && request.resource.data.keys().hasOnly(['name', 'email', 'role', 'supervisorId', 'phone', 'employeeId', 'designation', 'createdAt']);
-      allow update, delete: if isSenior();
+        && request.resource.data.keys().hasOnly(['name', 'email', 'role', 'supervisorId', 'phone', 'employeeId', 'designation', 'doj', 'photo', 'createdAt']);
+      // Senior manages everyone; each person can edit their own name, phone and profile photo.
+      allow update: if isSenior()
+        || (isActive() && request.auth.uid == uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'phone', 'photo']));
+      allow delete: if isSenior();
     }
 
     // Invites: only the Admin creates them; the invited person can read and remove their own.

@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="apple-touch-icon.png?v=2" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=5" />
+  <link rel="stylesheet" href="style.css?v=6" />
 </head>
 <body>
   <div class="bg-orbs"><span></span><span></span><span></span></div>
@@ -74,7 +74,13 @@
         <button data-tab="projects" class="tab staff-only">Projects</button>
         <button data-tab="team" class="tab senior-only">Team</button>
       </nav>
-      <div class="user"><span id="whoami"></span> <button class="secondary small-btn" id="logoutBtn">Sign out</button></div>
+      <div class="profile-wrap">
+        <button class="avatar-btn" id="profileBtn" type="button"><span class="avatar" id="meAvatar"></span><span class="who-txt"><b id="whoami"></b><small id="whoDesig"></small></span><span class="caret">▾</span></button>
+        <div id="profileMenu" class="menu glass hidden">
+          <button type="button" class="menu-item" id="openProfile">My profile</button>
+          <button type="button" class="menu-item danger-txt" id="logoutBtn">Sign out</button>
+        </div>
+      </div>
     </header>
 
     <!-- shared filters -->
@@ -84,7 +90,7 @@
       <select id="fPerson" class="staff-only"><option value="">All people</option></select>
       <select id="fStatus">
         <option value="">All open statuses</option>
-        <option>Not Started</option><option>In Progress</option><option>On Hold</option>
+        <option value="Not Started">Assigned</option><option value="In Progress">In Progress</option><option value="__ongoing">Ongoing</option>
       </select>
       <label class="small">From <input type="date" id="fFrom" /></label>
       <label class="small">To <input type="date" id="fTo" /></label>
@@ -98,7 +104,7 @@
           <thead>
             <tr>
               <th>ID</th><th>Task</th><th>Project</th><th>Assigned to</th><th>Priority</th><th>Due</th>
-              <th>Status</th><th>Assigned</th><th>Started</th><th>Time so far</th><th>Actions</th>
+              <th>Status</th><th>Type</th><th>Assigned</th><th>Started</th><th>Time / Est.</th><th>Actions</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -109,6 +115,7 @@
 
     <!-- COMPLETED TAB -->
     <main id="tab-completed" class="tabpane hidden">
+      <div class="search-bar glass"><span class="search-ico">🔍</span><input id="doneSearch" type="search" placeholder="Search completed tasks by any keyword: title, project, person, notes, ID…" /></div>
       <div class="table-wrap glass">
         <table id="doneTable">
           <thead>
@@ -128,7 +135,7 @@
       <div class="cards" id="kpis"></div>
       <h3 class="staff-only">By person</h3>
       <div class="table-wrap glass staff-only"><table id="byPerson"><thead><tr>
-        <th>Person</th><th>Designation</th><th>Supervisor</th><th>Not started</th><th>In progress</th><th>On hold</th>
+        <th>Person</th><th>Designation</th><th>Supervisor</th><th>Assigned</th><th>In progress</th><th>On hold</th>
         <th>Completed (7 days)</th><th>Avg time / task</th><th>Overdue</th></tr></thead><tbody></tbody></table></div>
       <h3>By project</h3>
       <div class="table-wrap glass"><table id="byProject"><thead><tr>
@@ -146,22 +153,23 @@
         <button id="newProjectBtn">+ Add project</button>
       </div>
       <div class="table-wrap glass"><table id="activeProjTable"><thead><tr>
-        <th>Client Name</th><th>Client Email</th><th>Brand Name</th><th>Company Name</th><th>Project Type</th>
-        <th>Revenue ($)</th><th>Managed by</th><th>Open tasks</th><th>Actions</th></tr></thead><tbody></tbody></table></div>
-      <div class="section-head"><h3>Archived projects</h3><span class="muted small">Ended services · not counted in total revenue</span></div>
+        <th>Client Name</th><th>Client Email</th><th>DOJ</th><th>Company Name</th><th>Project Type</th>
+        <th>Revenue ($)</th><th>No. of Projects</th><th>Managed by</th><th>Actions</th></tr></thead><tbody></tbody></table></div>
+      <div class="section-head"><h3>Ended projects</h3><span class="muted small">Ended services · not counted in total revenue</span></div>
       <div class="table-wrap glass"><table id="archivedProjTable" class="archived-table"><thead><tr>
-        <th>Client Name</th><th>Client Email</th><th>Brand Name</th><th>Company Name</th><th>Project Type</th>
-        <th>Revenue ($)</th><th>Managed by</th><th>Actions</th></tr></thead><tbody></tbody></table></div>
+        <th>Client Name</th><th>Client Email</th><th>DOJ</th><th>Company Name</th><th>Project Type</th>
+        <th>Revenue ($)</th><th>No. of Projects</th><th>Managed by</th><th>Actions</th></tr></thead><tbody></tbody></table></div>
     </main>
 
     <!-- TEAM TAB -->
     <main id="tab-team" class="tabpane hidden">
-      <div class="section-head"><h3>Add user</h3><span class="muted small">They get an email invite, then set their name, phone, employee ID and password</span></div>
+      <div class="section-head"><h3>Add user</h3><span class="muted small">They get an email invite, then set their name, phone, employee ID and password. Ecommerce Officers pick a supervisor.</span></div>
       <form id="inviteForm" class="toolbar glass invite-form">
         <input id="iEmail" type="email" placeholder="Email" required />
         <select id="iDesig" required><option value="">Designation</option></select>
         <select id="iRole" required><option value="">Access</option></select>
-        <select id="iSup"><option value="">Supervisor</option></select>
+        <select id="iSup" class="hidden"><option value="">Supervisor</option></select>
+        <label class="small muted inl-lbl">DOJ <input id="iDoj" type="date" /></label>
         <button type="submit" id="inviteBtn">Send invite</button>
       </form>
       <div class="table-wrap glass"><table id="inviteTable"><thead><tr>
@@ -169,11 +177,11 @@
       <div class="section-head"><h3>Pending approval</h3><span class="muted small">New sign-ups appear here</span></div>
       <div class="table-wrap glass"><table id="pendingTable"><thead><tr>
         <th>Name</th><th>Email</th><th>Phone</th><th>Employee ID</th><th>Signed up</th><th>Approve as</th><th></th></tr></thead><tbody></tbody></table></div>
-      <p class="small muted legend"><b>Designation</b> is the job title. <b>Access</b> decides what they can see:
+      <p class="small muted legend"><b>Designation</b> is the job title and decides who manages whom (Ecommerce Officers are managed by a Supervisor). <b>Access</b> only decides which options they can use:
         <b>Admin</b> = everything · <b>Manager</b> = their own team's tasks, projects &amp; dashboard · <b>Task Access</b> = only their own tasks &amp; dashboard.</p>
       <div class="section-head"><h3>Team</h3></div>
       <div class="table-wrap glass"><table id="teamTable"><thead><tr>
-        <th>Name</th><th>Email</th><th>Phone</th><th>Employee ID</th><th>Designation</th><th>Access</th><th>Supervisor</th><th></th></tr></thead><tbody></tbody></table></div>
+        <th>Name</th><th>Email</th><th>Phone</th><th>Employee ID</th><th>Date of joining</th><th>Designation</th><th>Access</th><th>Managed by</th><th></th></tr></thead><tbody></tbody></table></div>
     </main>
   </section>
 
@@ -184,6 +192,10 @@
       <label>Title <input id="tTitle" required /></label>
       <label>Description <textarea id="tDesc" rows="3"></textarea></label>
       <label>Project <select id="tProject" required></select></label>
+      <div class="row">
+        <label>Task type <select id="tType"><option value="">One-time</option><option>Daily</option><option>Weekly</option><option>Monthly</option></select></label>
+        <label id="tEstWrap" class="hidden">Estimated time <input id="tEst" placeholder="e.g. 2h or 30m" /></label>
+      </div>
       <label>Assign to <select id="tAssignee" required></select></label>
       <div class="row">
         <label>Priority <select id="tPriority"><option>High</option><option selected>Medium</option><option>Low</option></select></label>
@@ -205,8 +217,12 @@
       <datalist id="clientList"></datalist>
       <label>Client Email <input id="pClientEmail" type="email" placeholder="client@example.com" /></label>
       <div class="row">
-        <label>Brand Name <input id="pBrand" required /></label>
+        <label>Client ID <input id="pClientId" placeholder="e.g. C-102" /></label>
+        <label>Date of joining <input id="pDoj" type="date" /></label>
+      </div>
+      <div class="row">
         <label>Company Name <input id="pLlc" /></label>
+        <label>No. of Projects <input id="pNum" type="number" min="0" step="1" placeholder="1" /></label>
       </div>
       <div class="row">
         <label>Project Type <select id="pType"><option value="">– select –</option><option>Half Time</option><option>Full Time</option></select></label>
@@ -228,8 +244,39 @@
     <div class="row end"><button class="secondary" id="historyClose">Close</button></div>
   </dialog>
 
+  <!-- ========== PROFILE MODAL ========== -->
+  <dialog id="profileModal" class="glass">
+    <form id="profileForm" method="dialog">
+      <h3>My profile</h3>
+      <div class="profile-top">
+        <span class="avatar xl" id="pfAvatar"></span>
+        <div class="pf-photo-btns">
+          <label class="file-btn">Change photo<input id="pfPhoto" type="file" accept="image/*" hidden /></label>
+          <button type="button" class="secondary small-btn" id="pfRemovePhoto">Remove photo</button>
+        </div>
+      </div>
+      <div class="row">
+        <label>Full name <input id="pfName" required /></label>
+        <label>Phone <input id="pfPhone" type="tel" /></label>
+      </div>
+      <div class="pf-info" id="pfInfo"></div>
+      <details class="pf-pass">
+        <summary>Change password</summary>
+        <div class="row">
+          <label>Current password <input id="pfCurPass" type="password" autocomplete="current-password" /></label>
+          <label>New password <input id="pfNewPass" type="password" minlength="6" autocomplete="new-password" /></label>
+        </div>
+      </details>
+      <p id="pfMsg" class="msg small"></p>
+      <div class="row end">
+        <button type="button" class="secondary" id="pfCancel">Cancel</button>
+        <button type="submit" id="pfSave">Save</button>
+      </div>
+    </form>
+  </dialog>
+
   <div id="toast" class="toast hidden"></div>
 
-  <script type="module" src="app.js?v=5"></script>
+  <script type="module" src="app.js?v=6"></script>
 </body>
 </html>
