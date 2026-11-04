@@ -428,7 +428,6 @@ function renderTasks() {
     const btns = [["history", "History"]];
     if (canManage) btns.push(["delete", "Delete"]);
     return `<tr class="${isOverdue(t) ? "overdue" : ""} ${og ? "ongoing" : ""}">
-      <td>${shortId(t.id)}</td>
       <td class="title-cell"><b>${ed("task", t.id, "title", t.title, null, "text", canManage)}</b>
         <div class="desc">${ed("task", t.id, "desc", t.desc, t.desc ? esc(t.desc) : '<span class="ph">Add details</span>', "textarea", canManage)}</div>
         <div class="desc">📝 ${ed("task", t.id, "notes", t.notes, t.notes ? esc(t.notes) : '<span class="ph">Add note</span>', "textarea", canManage || mine)}</div></td>

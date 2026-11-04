@@ -256,3 +256,4 @@ tr.ongoing td { background: #faf7ff; }
 .pf-info span { color: var(--muted); font-size: 11px; }
 .pf-pass summary { cursor: pointer; color: #6a46f5; font-size: 13px; margin-bottom: 8px; }
 @media (max-width: 720px) { .avatar-btn .who-txt { display: none; } }
+
