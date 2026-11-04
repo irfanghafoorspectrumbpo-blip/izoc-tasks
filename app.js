@@ -4,7 +4,8 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword,
-  signOut, sendPasswordResetEmail, updateProfile
+  signOut, sendPasswordResetEmail, updateProfile, updatePassword,
+  sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, query, where,
@@ -30,13 +31,14 @@ let users = {};           // uid -> user
 let projects = {};        // id -> project
 let tasks = {};           // id -> task
 let projectDetails = {};  // id -> business details (staff only)
+let invites = {};         // email -> pending invite (admin only)
 let unsubs = [];
 let editingTaskId = null;
 let signUpMode = false;
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const ROLE_LABEL = { senior: "Senior", supervisor: "Supervisor", member: "Officer" };
+const ROLE_LABEL = { senior: "Admin", supervisor: "Manager", member: "Task Access" };
 const DESIGNATIONS = ["Senior Supervisor", "Supervisor", "Ecommerce Officer"];
 const TARGETS = { senior: { min: 7500, promo: 15000 }, supervisor: { min: 2500, promo: 7500 } };
 const MAX_PROJECTS_PER_CLIENT = 2;
@@ -51,7 +53,7 @@ function toast(msg) {
   clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.add("hidden"), 2800);
 }
 function show(screen) {
-  ["authScreen", "pendingScreen", "appScreen"].forEach((s) => $(s).classList.toggle("hidden", s !== screen));
+  ["authScreen", "pendingScreen", "inviteScreen", "appScreen"].forEach((s) => $(s).classList.toggle("hidden", s !== screen));
 }
 const toDate = (ts) => (ts?.toDate ? ts.toDate() : ts ? new Date(ts) : null);
 function fmtDT(ts) {
@@ -127,18 +129,58 @@ function niceErr(err) {
   if (c.includes("permission-denied")) return "You don't have permission for that.";
   return err?.message || "Something went wrong.";
 }
+$("completeForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const user = auth.currentUser; if (!user || !inviteData) return;
+  $("completeBtn").disabled = true; $("completeMsg").textContent = "";
+  try {
+    const name = $("cName").value.trim();
+    await updatePassword(user, $("cPass").value);
+    await updateProfile(user, { displayName: name });
+    await setDoc(doc(db, "users", user.uid), {
+      name, email: user.email, role: inviteData.role, designation: inviteData.designation,
+      supervisorId: inviteData.supervisorId || "", phone: $("cPhone").value.trim(),
+      employeeId: $("cEmpId").value.trim(), createdAt: serverTimestamp()
+    });
+    await deleteDoc(doc(db, "invites", String(user.email).toLowerCase())).catch(() => {});
+    inviteData = null;
+    await loadMe(user);
+  } catch (err) { $("completeMsg").textContent = niceErr(err); }
+  $("completeBtn").disabled = false;
+};
 $("logoutBtn").onclick = () => signOut(auth);
 $("pendingLogout").onclick = () => signOut(auth);
 
+// Invite link: the invited person opens the emailed link and lands here.
+const inviteParam = new URLSearchParams(location.search).get("invite");
+let inviteLinkPromise = Promise.resolve();
+if (isSignInWithEmailLink(auth, location.href)) {
+  const em = inviteParam || window.localStorage.getItem("izocInviteEmail") || prompt("Confirm your email to accept the invite");
+  inviteLinkPromise = signInWithEmailLink(auth, em, location.href)
+    .then(() => history.replaceState(null, "", location.pathname))
+    .catch((err) => { $("authMsg").textContent = "This invite link is expired or already used. Ask for a new invite, or sign in."; console.warn(err); });
+}
+let inviteData = null;
+
 onAuthStateChanged(auth, async (user) => {
-  unsubs.forEach((u) => u()); unsubs = []; tasks = {}; users = {}; projects = {}; projectDetails = {};
+  await inviteLinkPromise;
+  unsubs.forEach((u) => u()); unsubs = []; tasks = {}; users = {}; projects = {}; projectDetails = {}; invites = {};
   if (!user) { me = null; show("authScreen"); return; }
   await loadMe(user);
 });
 
 async function loadMe(user) {
   const snap = await getDoc(doc(db, "users", user.uid));
-  if (!snap.exists()) { show("pendingScreen"); return; } // account doc still being created
+  if (!snap.exists()) {
+    const em = String(user.email || "").toLowerCase();
+    const inv = em ? await getDoc(doc(db, "invites", em)).catch(() => null) : null;
+    if (inv?.exists()) {
+      inviteData = inv.data();
+      $("inviteFor").textContent = `${user.email} · ${inviteData.designation}`;
+      show("inviteScreen"); return;
+    }
+    show("pendingScreen"); return; // account doc still being created
+  }
   me = { uid: user.uid, ...snap.data() };
   if (!["senior", "supervisor", "member"].includes(me.role)) { show("pendingScreen"); return; }
   startApp();
@@ -162,6 +204,9 @@ function startApp() {
     renderAll();
   }));
 
+  if (isSenior()) unsubs.push(onSnapshot(collection(db, "invites"), (s) => {
+    invites = {}; s.forEach((d) => (invites[d.id] = d.data())); renderTeam();
+  }));
   if (isStaff()) unsubs.push(onSnapshot(collection(db, "projectDetails"), (s) => {
     projectDetails = {}; s.forEach((d) => (projectDetails[d.id] = d.data()));
     fillFilters(); renderProjects();
@@ -464,7 +509,7 @@ function openProjectModal(p) {
   $("clientList").innerHTML = [...new Set(Object.values(projectDetails).map((x) => x.clientName).filter(Boolean))]
     .map((c) => `<option value="${esc(c)}">`).join("");
   setOptions($("pManager"), supervisorsList().map((u) => [u.uid, `${u.name} (${u.designation || ROLE_LABEL[u.role]})`]), "– choose –");
-  $("pName").value = p?.name || ""; $("pClient").value = d.clientName || ""; $("pBrand").value = d.brandName || "";
+  $("pClient").value = d.clientName || ""; $("pClientEmail").value = d.clientEmail || ""; $("pBrand").value = d.brandName || p?.name || "";
   $("pLlc").value = d.llcName || ""; $("pType").value = d.projectType || "";
   $("pRevenue").value = d.revenue ?? "";
   $("pManager").value = d.managerId || (isSup() ? me.uid : "");
@@ -473,7 +518,7 @@ function openProjectModal(p) {
 }
 $("projectForm").onsubmit = async (e) => {
   e.preventDefault();
-  const name = $("pName").value.trim(), client = $("pClient").value.trim();
+  const name = $("pBrand").value.trim(), client = $("pClient").value.trim();
   if (!name || !client) return;
   const sameClient = Object.values(projects).filter((p) => p.id !== editingProjectId && p.active !== false &&
     clientKey(projectDetails[p.id]?.clientName) === clientKey(client));
@@ -483,7 +528,7 @@ $("projectForm").onsubmit = async (e) => {
   }
   const rev = $("pRevenue").value;
   const details = {
-    clientName: client, brandName: $("pBrand").value.trim(), llcName: $("pLlc").value.trim(),
+    clientName: client, clientEmail: $("pClientEmail").value.trim(), brandName: name, llcName: $("pLlc").value.trim(),
     projectType: $("pType").value, revenue: rev === "" ? null : Number(rev), managerId: $("pManager").value,
     updatedAt: serverTimestamp(), updatedBy: me.uid
   };
@@ -541,7 +586,7 @@ function projRow(p, archived) {
   const d = projectDetails[p.id] || {};
   const n = Object.values(tasks).filter((t) => t.projectId === p.id && t.status !== "Completed").length;
   return `<tr>
-    <td><b>${esc(d.clientName || "")}</b></td><td>${esc(p.name)}</td><td>${esc(d.brandName || "")}</td><td>${esc(d.llcName || "")}</td>
+    <td><b>${esc(d.clientName || "")}</b></td><td>${d.clientEmail ? `<a href="mailto:${esc(d.clientEmail)}">${esc(d.clientEmail)}</a>` : ""}</td><td>${esc(d.brandName || p.name)}</td><td>${esc(d.llcName || "")}</td>
     <td>${d.projectType ? `<span class="badge ${d.projectType === "Full Time" ? "s-full" : "s-half"}">${esc(d.projectType)}</span>` : ""}</td>
     <td><b>${d.revenue === null || d.revenue === undefined ? "" : money(d.revenue)}</b></td>
     <td>${esc(d.managerId ? `${userName(d.managerId)} (${desigOf(users[d.managerId])})` : "")}</td>
@@ -595,7 +640,7 @@ function renderTeam() {
       <td><b>${esc(u.name)}</b></td><td>${esc(u.email)}</td><td>${esc(u.phone || "")}</td><td>${esc(u.employeeId || "")}</td>
       <td>${fmtDT(u.createdAt)}</td>
       <td><select data-approve="${u.uid}"><option value="">– choose –</option>
-        <option value="member|Ecommerce Officer">Ecommerce Officer</option><option value="supervisor|Supervisor">Supervisor</option></select></td>
+        <option value="member|Ecommerce Officer">Ecommerce Officer · Task Access</option><option value="supervisor|Supervisor">Supervisor · Manager</option><option value="senior|Senior Supervisor">Senior Supervisor · Admin</option></select></td>
       <td><button class="secondary small-btn" data-uact="reject" data-id="${u.uid}">Reject</button></td></tr>`).join("")
     || `<tr><td colspan="7" class="muted">No one waiting for approval.</td></tr>`;
 
@@ -603,6 +648,17 @@ function renderTeam() {
   const order = { senior: 0, supervisor: 1, member: 2 };
   const team = all.filter((u) => u.role !== "pending")
     .sort((a, b) => (order[a.role] - order[b.role]) || a.name.localeCompare(b.name));
+  const keepSel = (el, opts, ph) => { const v = el.value; setOptions(el, opts, ph); el.value = v; };
+  keepSel($("iDesig"), DESIGNATIONS.map((d) => [d, d]), "Designation");
+  keepSel($("iRole"), ["member", "supervisor", "senior"].map((r) => [r, ROLE_LABEL[r]]), "Access");
+  keepSel($("iSup"), sups.map((x) => [x.uid, `${x.name} (${desigOf(x)})`]), "Supervisor (for Task Access)");
+  $("inviteTable").querySelector("tbody").innerHTML = Object.values(invites)
+    .sort((a, b) => (toDate(b.createdAt) || 0) - (toDate(a.createdAt) || 0))
+    .map((i) => `<tr><td>${esc(i.email)}</td><td>${esc(i.designation)}</td><td>${esc(ROLE_LABEL[i.role] || i.role)}</td>
+      <td>${esc(i.supervisorId ? userName(i.supervisorId) : "")}</td><td>${fmtDT(i.createdAt)}</td>
+      <td><div class="actions"><button class="secondary small-btn" data-iact="resend" data-id="${esc(i.email)}">Resend</button>
+      <button class="secondary small-btn" data-iact="cancel" data-id="${esc(i.email)}">Cancel</button></div></td></tr>`).join("")
+    || `<tr><td colspan="6" class="muted">No pending invites.</td></tr>`;
   $("teamTable").querySelector("tbody").innerHTML = team.map((u) => {
     const self = u.uid === me.uid;
     return `<tr>
@@ -619,8 +675,29 @@ function renderTeam() {
     </tr>`;
   }).join("");
 }
+const inviteUrl = (email) => `${location.origin}${location.pathname}?invite=${encodeURIComponent(email)}`;
+async function sendInvite(email) {
+  await sendSignInLinkToEmail(auth, email, { url: inviteUrl(email), handleCodeInApp: true });
+}
+$("inviteForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const email = $("iEmail").value.trim().toLowerCase(), designation = $("iDesig").value, role = $("iRole").value;
+  const supervisorId = role === "member" ? $("iSup").value : "";
+  if (!email || !designation || !role) return;
+  if (Object.values(users).some((u) => String(u.email).toLowerCase() === email)) { toast("This email already has an account."); return; }
+  $("inviteBtn").disabled = true;
+  try {
+    await setDoc(doc(db, "invites", email), { email, designation, role, supervisorId, invitedBy: me.uid, createdAt: serverTimestamp() });
+    await sendInvite(email);
+    $("iEmail").value = ""; toast(`Invite sent to ${email}`);
+  } catch (err) {
+    toast(String(err?.code || "").includes("quota") ? "Daily invite limit reached (5 per day on the free plan). Try tomorrow." : niceErr(err));
+  }
+  $("inviteBtn").disabled = false;
+};
 $("tab-team").onchange = async (e) => {
   const el = e.target;
+  if (el.closest("#inviteForm")) return;
   try {
     if (el.dataset.approve) {
       if (!el.value) return;
@@ -635,6 +712,14 @@ $("tab-team").onchange = async (e) => {
   } catch (err) { toast(niceErr(err)); }
 };
 $("tab-team").onclick = async (e) => {
+  const ib = e.target.closest("button[data-iact]");
+  if (ib) {
+    try {
+      if (ib.dataset.iact === "resend") { await sendInvite(ib.dataset.id); toast("Invite sent again"); }
+      if (ib.dataset.iact === "cancel" && confirm(`Cancel invite for ${ib.dataset.id}?`)) { await deleteDoc(doc(db, "invites", ib.dataset.id)); toast("Invite cancelled"); }
+    } catch (err) { toast(String(err?.code || "").includes("quota") ? "Daily invite limit reached (5 per day on the free plan). Try tomorrow." : niceErr(err)); }
+    return;
+  }
   const b = e.target.closest("button[data-uact]"); if (!b) return;
   const u = users[b.dataset.id]; if (!u) return;
   try {

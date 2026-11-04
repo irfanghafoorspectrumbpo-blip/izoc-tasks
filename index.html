@@ -6,7 +6,7 @@
   <title>Izoc Solution – Task Tracker</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=3" />
+  <link rel="stylesheet" href="style.css?v=4" />
 </head>
 <body>
   <div class="bg-orbs"><span></span><span></span><span></span></div>
@@ -30,6 +30,23 @@
         <a href="#" id="forgotPass">Forgot password?</a>
       </p>
       <p id="authMsg" class="msg"></p>
+    </div>
+  </section>
+
+  <!-- ========== COMPLETE INVITE SCREEN ========== -->
+  <section id="inviteScreen" class="screen hidden">
+    <div class="auth-card glass">
+      <div class="logo3d">IZ</div>
+      <h2>Complete your account</h2>
+      <p class="muted" id="inviteFor"></p>
+      <form id="completeForm">
+        <input id="cName" type="text" placeholder="Full name" required />
+        <input id="cPhone" type="tel" placeholder="Phone number" required />
+        <input id="cEmpId" type="text" placeholder="Employee ID" required />
+        <input id="cPass" type="password" placeholder="Create password (min 6 characters)" required minlength="6" />
+        <button type="submit" id="completeBtn">Finish &amp; sign in</button>
+      </form>
+      <p id="completeMsg" class="msg"></p>
     </div>
   </section>
 
@@ -105,8 +122,6 @@
 
     <!-- DASHBOARD TAB -->
     <main id="tab-dashboard" class="tabpane hidden">
-      <div id="revenuePanel" class="staff-only"></div>
-      <h3 class="staff-only">Tasks</h3>
       <div class="cards" id="kpis"></div>
       <h3 class="staff-only">By person</h3>
       <div class="table-wrap glass staff-only"><table id="byPerson"><thead><tr>
@@ -122,26 +137,37 @@
 
     <!-- PROJECTS TAB -->
     <main id="tab-projects" class="tabpane hidden">
+      <div id="revenuePanel"></div>
       <div class="section-head">
         <h3>Current projects</h3>
         <button id="newProjectBtn">+ Add project</button>
       </div>
       <div class="table-wrap glass"><table id="activeProjTable"><thead><tr>
-        <th>Client Name</th><th>Project Title</th><th>Brand Name</th><th>LLC Name</th><th>Project Type</th>
+        <th>Client Name</th><th>Client Email</th><th>Brand Name</th><th>Company Name</th><th>Project Type</th>
         <th>Revenue ($)</th><th>Managed by</th><th>Open tasks</th><th>Actions</th></tr></thead><tbody></tbody></table></div>
       <div class="section-head"><h3>Archived projects</h3><span class="muted small">Ended services · not counted in total revenue</span></div>
       <div class="table-wrap glass"><table id="archivedProjTable" class="archived-table"><thead><tr>
-        <th>Client Name</th><th>Project Title</th><th>Brand Name</th><th>LLC Name</th><th>Project Type</th>
+        <th>Client Name</th><th>Client Email</th><th>Brand Name</th><th>Company Name</th><th>Project Type</th>
         <th>Revenue ($)</th><th>Managed by</th><th>Actions</th></tr></thead><tbody></tbody></table></div>
     </main>
 
     <!-- TEAM TAB -->
     <main id="tab-team" class="tabpane hidden">
+      <div class="section-head"><h3>Add user</h3><span class="muted small">They get an email invite, then set their name, phone, employee ID and password</span></div>
+      <form id="inviteForm" class="toolbar glass invite-form">
+        <input id="iEmail" type="email" placeholder="Email" required />
+        <select id="iDesig" required><option value="">Designation</option></select>
+        <select id="iRole" required><option value="">Access</option></select>
+        <select id="iSup"><option value="">Supervisor</option></select>
+        <button type="submit" id="inviteBtn">Send invite</button>
+      </form>
+      <div class="table-wrap glass"><table id="inviteTable"><thead><tr>
+        <th>Email</th><th>Designation</th><th>Access</th><th>Supervisor</th><th>Invited</th><th></th></tr></thead><tbody></tbody></table></div>
       <div class="section-head"><h3>Pending approval</h3><span class="muted small">New sign-ups appear here</span></div>
       <div class="table-wrap glass"><table id="pendingTable"><thead><tr>
         <th>Name</th><th>Email</th><th>Phone</th><th>Employee ID</th><th>Signed up</th><th>Approve as</th><th></th></tr></thead><tbody></tbody></table></div>
       <p class="small muted legend"><b>Designation</b> is the job title. <b>Access</b> decides what they can see:
-        <b>Senior</b> = everything · <b>Supervisor</b> = their own team's tasks, projects &amp; dashboard · <b>Officer</b> = only their own tasks &amp; dashboard.</p>
+        <b>Admin</b> = everything · <b>Manager</b> = their own team's tasks, projects &amp; dashboard · <b>Task Access</b> = only their own tasks &amp; dashboard.</p>
       <div class="section-head"><h3>Team</h3></div>
       <div class="table-wrap glass"><table id="teamTable"><thead><tr>
         <th>Name</th><th>Email</th><th>Phone</th><th>Employee ID</th><th>Designation</th><th>Access</th><th>Supervisor</th><th></th></tr></thead><tbody></tbody></table></div>
@@ -174,10 +200,10 @@
       <h3 id="projectModalTitle">New project</h3>
       <label>Client Name <input id="pClient" list="clientList" required placeholder="Type a new client or pick an existing one" /></label>
       <datalist id="clientList"></datalist>
-      <label>Project title <input id="pName" required /></label>
+      <label>Client Email <input id="pClientEmail" type="email" placeholder="client@example.com" /></label>
       <div class="row">
-        <label>Brand Name <input id="pBrand" /></label>
-        <label>LLC Name <input id="pLlc" /></label>
+        <label>Brand Name <input id="pBrand" required /></label>
+        <label>Company Name <input id="pLlc" /></label>
       </div>
       <div class="row">
         <label>Project Type <select id="pType"><option value="">– select –</option><option>Half Time</option><option>Full Time</option></select></label>
@@ -201,6 +227,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script type="module" src="app.js?v=4"></script>
+  <script type="module" src="app.js?v=5"></script>
 </body>
 </html>

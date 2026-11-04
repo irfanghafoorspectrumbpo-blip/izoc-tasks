@@ -177,3 +177,4 @@ dialog label { display: flex; flex-direction: column; gap: 5px; font-size: 12px;
 
 .total-row td { font-weight: 700; background: #f3f0ff; }
 .archived-table td { color: var(--muted); }
+.invite-form { margin: 0 0 12px; } .invite-form input[type=email] { min-width: 240px; }
