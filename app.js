@@ -335,8 +335,10 @@ function startApp() {
       ? [query(col, where("supervisorId", "==", me.uid)), query(col, where("assigneeId", "==", me.uid))]
       : [query(col, where("assigneeId", "==", me.uid))];
   const buckets = qs.map(() => ({}));
+  setupNotifications();
   qs.forEach((q, i) => unsubs.push(onSnapshot(q, (s) => {
     buckets[i] = {}; s.forEach((d) => (buckets[i][d.id] = { id: d.id, ...d.data() }));
+    notifyNewAssignments(s);
     tasks = Object.assign({}, ...buckets);
     scheduleRender();
   }, (err) => toast(niceErr(err)))));
@@ -953,3 +955,40 @@ $("profileForm").onsubmit = async (e) => {
   }
   $("pfSave").disabled = false;
 };
+
+// ---------- desktop notifications (new task assigned to me) ----------
+const NOTIF_KEY = () => `ta-notified-${me?.uid}`;
+let notifReady = false;
+function setupNotifications() {
+  notifReady = false;
+  if (!("Notification" in window)) return;
+  if (Notification.permission === "default") {
+    const ask = () => { Notification.requestPermission(); document.removeEventListener("click", ask); };
+    document.addEventListener("click", ask);
+  }
+}
+function notifyNewAssignments(snap) {
+  if (!me) return;
+  let seen; try { seen = JSON.parse(localStorage.getItem(NOTIF_KEY()) || "{}"); } catch { seen = {}; }
+  const first = !localStorage.getItem(NOTIF_KEY());
+  const fresh = [];
+  snap.docChanges().forEach((ch) => {
+    const t = { id: ch.doc.id, ...ch.doc.data() };
+    if (t.assigneeId !== me.uid || t.status === "Completed") return;
+    const key = t.id + "|" + t.assigneeId;
+    if (seen[key]) return;
+    seen[key] = 1;
+    // only alert for tasks given by someone else, and not the old backlog on first launch
+    if (!first && t.assignedById !== me.uid && (ch.type === "added" || ch.type === "modified")) fresh.push(t);
+  });
+  localStorage.setItem(NOTIF_KEY(), JSON.stringify(seen));
+  if (!fresh.length) return;
+  fresh.forEach((t) => toast(`New task: ${t.title}`));
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  const show = (title, body, tag) => {
+    const n = new Notification(title, { body, icon: "favicon.png?v=2", tag, requireInteraction: false });
+    n.onclick = () => { window.focus(); switchTab("tasks"); n.close(); };
+  };
+  if (fresh.length > 3) show("Team Arsalan", `You have ${fresh.length} new tasks assigned.`, "bulk");
+  else fresh.forEach((t) => show("New task assigned", `${t.title}\n${projects[t.projectId]?.name || t.projectName || ""} · from ${userName(t.assignedById)}${t.recurrence ? " · Ongoing " + t.recurrence : t.due ? " · due " + t.due : ""}`, t.id));
+}
