@@ -257,3 +257,39 @@ tr.ongoing td { background: #faf7ff; }
 .pf-pass summary { cursor: pointer; color: #6a46f5; font-size: 13px; margin-bottom: 8px; }
 @media (max-width: 720px) { .avatar-btn .who-txt { display: none; } }
 
+
+/* ===== v7: phone layout (all tabs visible, tables become cards) ===== */
+@media (max-width: 720px) {
+  body { font-size: 14px; }
+  .topbar { position: static; padding: 10px 12px; margin: 8px 8px 0; gap: 8px; }
+  .brand { font-size: 15px; }
+  .profile-wrap { margin-left: auto; }
+  #tabs { order: 3; flex: 1 1 100%; width: 100%; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; overflow: visible; }
+  #tabs .tab { padding: 8px 4px; font-size: 13px; white-space: nowrap; text-align: center; }
+  #tabs .tab.hidden { display: none; }
+  .toolbar { margin: 8px 8px 0; padding: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .toolbar > * { width: 100%; min-width: 0; }
+  .toolbar label { font-size: 12px; }
+  .toolbar label input { flex: 1; min-width: 0; }
+  .toolbar .hidden { display: none; }
+  .tabpane { padding: 8px 8px 40px; }
+  .table-wrap { overflow: visible; background: transparent !important; box-shadow: none !important; border: 0 !important; backdrop-filter: none !important; }
+  .table-wrap table, .table-wrap tbody, .table-wrap tr, .table-wrap td, .table-wrap tfoot { display: block; width: 100%; }
+  .table-wrap thead { display: none; }
+  .table-wrap tr { background: #fff; border: 1px solid var(--line); border-radius: 14px; margin: 0 0 10px; padding: 6px 12px;
+    box-shadow: 0 6px 16px -10px rgba(30,35,64,.35); }
+  .table-wrap tr.overdue { border-left: 4px solid #e5484d; }
+  .table-wrap tr.ongoing { border-left: 4px solid #7c5cff; }
+  .table-wrap td { white-space: normal; border-bottom: 1px dashed var(--line); padding: 8px 0; display: flex; align-items: center;
+    justify-content: space-between; gap: 10px; text-align: right; min-height: 20px; }
+  .table-wrap td:last-child { border-bottom: 0; }
+  .table-wrap td:empty { display: none; }
+  .table-wrap td[data-label]::before { content: attr(data-label); font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .05em; color: var(--muted); text-align: left; flex: none; max-width: 45%; }
+  .table-wrap td.title-cell, .table-wrap td.nolabel { display: block; text-align: left; }
+  .table-wrap td.title-cell::before, .table-wrap td.nolabel::before { display: none; }
+  .table-wrap td > * { max-width: 100%; }
+  .table-wrap .actions { justify-content: flex-end; flex-wrap: wrap; }
+  dialog { width: calc(100vw - 24px); max-width: none; }
+  .invite-form input[type=email] { min-width: 0; }
+}

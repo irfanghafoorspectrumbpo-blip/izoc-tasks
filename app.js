@@ -991,3 +991,22 @@ function notifyNewAssignments(snap) {
   if (fresh.length > 3) show("Team Arsalan", `You have ${fresh.length} new tasks assigned.`, "bulk");
   else fresh.forEach((t) => show("New task assigned", `${t.title}\n${projects[t.projectId]?.name || t.projectName || ""} · from ${userName(t.assignedById)}${t.recurrence ? " · Ongoing " + t.recurrence : t.due ? " · due " + t.due : ""}`, t.id));
 }
+
+// ---------- v9: phone card labels (copies each column header onto its cells) ----------
+function labelCells(root = document) {
+  root.querySelectorAll(".table-wrap table").forEach((tbl) => {
+    const heads = [...tbl.querySelectorAll("thead th")].map((th) => th.textContent.trim());
+    tbl.querySelectorAll("tbody tr").forEach((tr) => {
+      let i = 0;
+      [...tr.children].forEach((td) => {
+        const span = Number(td.getAttribute("colspan") || 1);
+        const h = span > 1 ? "" : heads[i] || "";
+        if (h && !td.classList.contains("title-cell")) td.setAttribute("data-label", h); else td.removeAttribute("data-label");
+        if (!h) td.classList.add("nolabel");
+        i += span;
+      });
+    });
+  });
+}
+new MutationObserver(() => { clearTimeout(labelCells._t); labelCells._t = setTimeout(labelCells, 30); })
+  .observe(document.body, { childList: true, subtree: true });
