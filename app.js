@@ -381,7 +381,7 @@ function fillFilters() {
 }
 ["fProject", "fPerson", "fStatus", "fFrom", "fTo"].forEach((id) => ($(id).onchange = renderTasks));
 $("doneSearch").oninput = () => renderDone();
-function projName(d) { return [d?.clientName, d?.llcName].map((x) => String(x || "").trim()).filter(Boolean).filter((x, i, a) => a.indexOf(x) === i).join(" · "); }
+function projName(d) { return String(d?.clientName || "").trim() || String(d?.llcName || "").trim(); }
 let projSynced = false;
 function syncProjectNames() {
   if (projSynced || !isStaff() || !Object.keys(projectDetails).length || !Object.keys(projects).length) return;
@@ -440,8 +440,7 @@ function renderTasks() {
       <td>${sel("task", t.id, "projectId", t.projectId, pOpts, canManage)}</td>
       <td>${sel("task", t.id, "assigneeId", t.assigneeId, uOpts, canManage)}<div class="small muted">by ${esc(userName(t.assignedById))}</div></td>
       <td>${og ? '<span class="p-high">High</span>' : sel("task", t.id, "priority", t.priority || "Medium", [["High", "High"], ["Medium", "Medium"], ["Low", "Low"]], canManage, `data-pri="${esc(t.priority || "Medium")}"`)}</td>
-      <td>${og ? '<span class="muted small">Recurring</span>' : dateInl("task", t.id, "due", t.due, canManage)}${isOverdue(t) ? ' <span class="badge s-overdue">Overdue</span>' : ""}</td>
-      <td>${(mine || canManage) ? sel("task", t.id, "status", t.status, stOpts, true, `data-st="${statusClass(t.status)}"`) : `<span class="badge ${statusClass(t.status)}">${esc(stLabel(t.status))}</span>`}</td>
+      <td>${og ? "" : dateInl("task", t.id, "due", t.due, canManage)}${isOverdue(t) ? '<div class="od-wrap"><span class="badge s-overdue">Overdue</span></div>' : ""}</td>
       <td>${canManage ? sel("task", t.id, "recurrence", t.recurrence || "", [["", "One-time"], ["Daily", "Ongoing · Daily"], ["Weekly", "Ongoing · Weekly"], ["Monthly", "Ongoing · Monthly"]], true, `data-og="${og ? 1 : 0}"`)
         : og ? `<span class="badge s-ongoing">Ongoing · ${esc(t.recurrence)}</span>` : '<span class="muted small">One-time</span>'}</td>
       <td>${fmtDT(t.assignedAt)}</td>
@@ -460,16 +459,16 @@ function renderTasks() {
   tickTimers();
 }
 function timerCell(t, mine, canManage) {
-  if (isOngoing(t)) return '<span class="muted small">—</span>';
+  if (isOngoing(t)) return "";
   const can = mine || canManage;
-  const started = t.startedAt ? `<div class="small muted">Started ${fmtDT(t.startedAt)}</div>` : "";
+  const started = t.startedAt ? `<div class="tm-start">Started ${fmtDT(t.startedAt)}</div>` : "";
   if (t.status === "In Progress") {
     const base = t.workMs || 0, res = t.lastResumeAt ? toDate(t.lastResumeAt).getTime() : Date.now();
-    return `<div class="timer-box"><span class="live-timer" data-base="${base}" data-res="${res}">${clock(base + Date.now() - res)}</span>
-      ${can ? `<button class="btn-complete" data-act="complete" data-id="${t.id}">✓ Complete</button>` : ""}</div>${started}`;
+    return `<div class="tm">${can ? `<button class="btn-complete" data-act="complete" data-id="${t.id}">✓ Complete</button>` : `<span class="badge ${statusClass(t.status)}">In Progress</span>`}
+      <span class="live-timer" data-base="${base}" data-res="${res}">${clock(base + Date.now() - res)}</span>${started}</div>`;
   }
-  if (!can) return started || '<span class="muted small">Not started</span>';
-  return `<button class="btn-start" data-act="start" data-id="${t.id}">▶ ${t.status === "On Hold" ? "Resume" : "Start"}</button>${started}`;
+  const paused = t.workMs ? `<span class="live-timer paused">${clock(t.workMs)}</span>` : "";
+  return `<div class="tm">${can ? `<button class="btn-start" data-act="start" data-id="${t.id}">▶ ${t.status === "On Hold" || t.workMs ? "Resume" : "Start"}</button>` : `<span class="badge ${statusClass(t.status)}">${esc(stLabel(t.status))}</span>`}${paused}${started}</div>`;
 }
 function clock(ms) { const s = Math.max(0, Math.floor(ms / 1000)); const p = (n) => String(n).padStart(2, "0"); return `${p(Math.floor(s / 3600))}:${p(Math.floor(s / 60) % 60)}:${p(s % 60)}`; }
 function tickTimers() { document.querySelectorAll(".live-timer").forEach((el) => { el.textContent = clock(Number(el.dataset.base) + Date.now() - Number(el.dataset.res)); }); }
