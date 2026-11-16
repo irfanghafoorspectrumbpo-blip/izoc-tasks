@@ -503,7 +503,7 @@ function renderTasks() {
         <div class="desc">${ed("task", t.id, "desc", t.desc, t.desc ? esc(t.desc) : '<span class="ph">Add details</span>', "textarea", canManage)}</div>
         <div class="desc">📝 ${ed("task", t.id, "notes", t.notes, t.notes ? esc(t.notes) : '<span class="ph">Add note</span>', "textarea", canManage || mine)}</div></td>
       <td>${sel("task", t.id, "projectId", t.projectId, pOpts, canManage)}</td>
-      <td>${sel("task", t.id, "assigneeId", t.assigneeId, uOpts, canManage)}<div class="small muted">by ${esc(userName(t.assignedById))}</div></td>
+      <td>${mselBtn("asg:" + t.id, [t.assigneeId], canManage)}<div class="small muted">by ${esc(userName(t.assignedById))}</div></td>
       <td>${og ? '<span class="p-high">High</span>' : sel("task", t.id, "priority", t.priority || "Medium", [["High", "High"], ["Medium", "Medium"], ["Low", "Low"]], canManage, `data-pri="${esc(t.priority || "Medium")}"`)}</td>
       <td>${og ? "" : dateInl("task", t.id, "due", t.due, canManage)}${isOverdue(t) ? '<div class="od-wrap"><span class="badge s-overdue">Overdue</span></div>' : ""}</td>
       <td>${canManage ? sel("task", t.id, "recurrence", t.recurrence || "", [["", "One-time"], ["Daily", "Ongoing · Daily"], ["Weekly", "Ongoing · Weekly"], ["Monthly", "Ongoing · Monthly"]], true, `data-og="${og ? 1 : 0}"`)
@@ -636,6 +636,37 @@ $("teamTable").addEventListener("click", (e) => {
   let ids = managersOf(uid);
   openMsel(b, pool, ids, (next) => { ids = next; b.innerHTML = mselLabel(ids) + '<span class="msel-caret">▾</span>'; },
     () => updateDoc(doc(db, "users", uid), { managerIds: ids, supervisorId: ids[0] || "", coSupervisorId: "" }).catch((err) => toast(niceErr(err))));
+});
+
+// "Assigned to" checkbox list in task tables: tick more people = a copy of this task for each
+function copyTaskTo(t, assigneeId) {
+  const supId = supervisorFor(assigneeId);
+  return addDoc(collection(db, "tasks"), {
+    title: t.title || "", desc: t.desc || "", projectId: t.projectId, projectName: projects[t.projectId]?.name || t.projectName || "",
+    assigneeId, supervisorId: supId, managerIds: managerIdsFor(assigneeId, supId, me.uid),
+    priority: t.priority || "Medium", due: t.due || "", notes: "", recurrence: t.recurrence || "", estimate: t.estimate || "",
+    status: "Not Started", assignedById: me.uid, assignedAt: serverTimestamp(), updatedAt: serverTimestamp(),
+    startedAt: null, completedAt: null, workMs: 0, lastResumeAt: null,
+    history: [{ at: Timestamp.now(), by: me.uid, action: `Assigned to ${userName(assigneeId)}` }]
+  });
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest(".msel-btn[data-msel^='asg:']"); if (!b) return;
+  if (mselOpen) { closeMsel(); return; }
+  const t = tasks[b.dataset.msel.slice(4)]; if (!t) return;
+  const opts = assignableUsers().sort((a, c) => a.name.localeCompare(c.name)).map((u) => [u.uid, u.name, u.designation || ROLE_LABEL[u.role]]);
+  if (!opts.some(([v]) => v === t.assigneeId)) opts.unshift([t.assigneeId, userName(t.assigneeId), ""]);
+  let ids = [t.assigneeId];
+  openMsel(b, opts, ids, (next) => { ids = next; b.innerHTML = mselLabel(ids, "– choose –") + '<span class="msel-caret">▾</span>'; },
+    async () => {
+      if (!ids.length || (ids.length === 1 && ids[0] === t.assigneeId)) { b.innerHTML = mselLabel([t.assigneeId]) + '<span class="msel-caret">▾</span>'; return; }
+      try {
+        const rest = ids.filter((x) => x !== t.assigneeId);
+        if (!ids.includes(t.assigneeId)) await saveTaskField(t, "assigneeId", rest.shift());
+        for (const a of rest) await copyTaskTo(t, a);
+        toast(rest.length ? `Assigned to ${rest.length} more ${rest.length > 1 ? "people" : "person"}` : "Reassigned");
+      } catch (err) { toast(niceErr(err)); }
+    });
 });
 
 // ---------- task modal ----------
