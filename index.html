@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="apple-touch-icon.png?v=2" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=7" />
+  <link rel="stylesheet" href="style.css?v=8" />
 </head>
 <body>
   <div class="bg-orbs"><span></span><span></span><span></span></div>
@@ -69,6 +69,7 @@
       <div class="brand"><img class="logo-img sm" src="favicon.png?v=2" alt="" /> Team Arsalan</div>
       <nav id="tabs">
         <button data-tab="tasks" class="tab active">Pending Tasks</button>
+        <button data-tab="ongoing" class="tab senior-only">Ongoing Tasks</button>
         <button data-tab="completed" class="tab">Completed</button>
         <button data-tab="dashboard" class="tab">Dashboard</button>
         <button data-tab="projects" class="tab staff-only">Projects</button>
@@ -104,13 +105,27 @@
           <thead>
             <tr>
               <th>Task</th><th>Project</th><th>Assigned to</th><th>Priority</th><th>Due</th>
-              <th>Status</th><th>Type</th><th>Assigned</th><th>Started</th><th>Time / Est.</th><th>Actions</th>
+              <th>Status</th><th>Type</th><th>Assigned</th><th>Timer</th><th>Time / Est.</th><th>Actions</th>
             </tr>
           </thead>
           <tbody></tbody>
         </table>
       </div>
       <p id="taskEmpty" class="muted empty hidden">No pending tasks. 🎉</p>
+    </main>
+
+    <!-- ONGOING TAB (admin) -->
+    <main id="tab-ongoing" class="tabpane hidden">
+      <div class="table-wrap glass">
+        <table id="ongoingTable">
+          <thead><tr>
+            <th>Task</th><th>Project</th><th>Assigned to</th><th>Priority</th><th>Due</th>
+            <th>Status</th><th>Type</th><th>Assigned</th><th>Timer</th><th>Time / Est.</th><th>Actions</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p id="ongoingEmpty" class="muted empty hidden">No ongoing tasks.</p>
     </main>
 
     <!-- COMPLETED TAB -->
@@ -277,6 +292,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script type="module" src="app.js?v=9"></script>
+  <script type="module" src="app.js?v=10"></script>
 </body>
 </html>

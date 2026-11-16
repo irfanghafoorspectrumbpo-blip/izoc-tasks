@@ -162,7 +162,7 @@ async function saveField(kind, id, field, value, type) {
     await setDoc(doc(db, "projectDetails", id), upd, { merge: true });
     if (field === "clientName" || field === "llcName") {
       const d = { ...(projectDetails[id] || {}), [field]: value };
-      const name = d.llcName || d.clientName; if (name) await updateDoc(doc(db, "projects", id), { name });
+      const name = projName(d); if (name) await updateDoc(doc(db, "projects", id), { name });
     }
     return;
   }
@@ -352,12 +352,12 @@ function switchTab(tab) {
   currentTab = tab;
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
   document.querySelectorAll(".tabpane").forEach((p) => p.classList.toggle("hidden", p.id !== "tab-" + tab));
-  $("taskToolbar").classList.toggle("hidden", !["tasks", "completed"].includes(tab));
+  $("taskToolbar").classList.toggle("hidden", !["tasks", "ongoing", "completed"].includes(tab));
   $("fStatus").classList.toggle("hidden", tab !== "tasks");
-  $("newTaskBtn").classList.toggle("hidden", tab !== "tasks" || !isStaff());
+  $("newTaskBtn").classList.toggle("hidden", !["tasks", "ongoing"].includes(tab) || !isStaff());
 }
 
-function renderAll() { fillFilters(); renderTasks(); renderDashboard(); renderProjects(); renderTeam(); }
+function renderAll() { syncProjectNames(); fillFilters(); renderTasks(); renderDashboard(); renderProjects(); renderTeam(); }
 
 // people this user may assign to
 function assignableUsers() {
@@ -381,6 +381,13 @@ function fillFilters() {
 }
 ["fProject", "fPerson", "fStatus", "fFrom", "fTo"].forEach((id) => ($(id).onchange = renderTasks));
 $("doneSearch").oninput = () => renderDone();
+function projName(d) { return [d?.clientName, d?.llcName].map((x) => String(x || "").trim()).filter(Boolean).filter((x, i, a) => a.indexOf(x) === i).join(" · "); }
+let projSynced = false;
+function syncProjectNames() {
+  if (projSynced || !isStaff() || !Object.keys(projectDetails).length || !Object.keys(projects).length) return;
+  projSynced = true;
+  Object.values(projects).forEach((p) => { const n = projName(projectDetails[p.id]); if (n && n !== p.name) updateDoc(doc(db, "projects", p.id), { name: n }).catch(() => {}); });
+}
 function projLabel(pid) {
   const p = projects[pid]; const c = projectDetails[pid]?.clientName;
   return (c ? c + " · " : "") + (p?.name || "");
@@ -414,10 +421,9 @@ function renderTasks() {
   if (inlineActive || inlFocused()) { needRender = true; return; }
   const list = filteredTasks("open");
   renderDone();
-  $("taskEmpty").classList.toggle("hidden", list.length > 0);
   const projOpts = activeProjects().map((p) => [p.id, projects[p.id].name]);
   const peopleOpts = assignableUsers().sort((a, b) => a.name.localeCompare(b.name)).map((u) => [u.uid, u.name]);
-  $("taskTable").querySelector("tbody").innerHTML = list.map((t) => {
+  const row = (t) => {
     const mine = t.assigneeId === me.uid;
     const canManage = isSenior() || (isSup() && t.supervisorId === me.uid);
     const og = isOngoing(t);
@@ -439,12 +445,35 @@ function renderTasks() {
       <td>${canManage ? sel("task", t.id, "recurrence", t.recurrence || "", [["", "One-time"], ["Daily", "Ongoing · Daily"], ["Weekly", "Ongoing · Weekly"], ["Monthly", "Ongoing · Monthly"]], true, `data-og="${og ? 1 : 0}"`)
         : og ? `<span class="badge s-ongoing">Ongoing · ${esc(t.recurrence)}</span>` : '<span class="muted small">One-time</span>'}</td>
       <td>${fmtDT(t.assignedAt)}</td>
-      <td>${fmtDT(t.startedAt)}</td>
+      <td>${timerCell(t, mine, canManage)}</td>
       <td>${og ? `<span class="est">Est. ${ed("task", t.id, "estimate", t.estimate, null, "text", canManage)}</span>` : fmtDur(workMs(t))}</td>
       <td><div class="actions">${btns.map(([a, l]) => `<button class="secondary small-btn" data-act="${a}" data-id="${t.id}">${l}</button>`).join("")}</div></td>
     </tr>`;
-  }).join("");
+  };
+  const senior = isSenior();
+  const pend = senior ? list.filter((t) => !isOngoing(t)) : list;
+  const ong = senior ? list.filter((t) => isOngoing(t)) : [];
+  $("taskEmpty").classList.toggle("hidden", pend.length > 0);
+  $("taskTable").querySelector("tbody").innerHTML = pend.map(row).join("");
+  $("ongoingEmpty").classList.toggle("hidden", ong.length > 0);
+  $("ongoingTable").querySelector("tbody").innerHTML = ong.map(row).join("");
+  tickTimers();
 }
+function timerCell(t, mine, canManage) {
+  if (isOngoing(t)) return '<span class="muted small">—</span>';
+  const can = mine || canManage;
+  const started = t.startedAt ? `<div class="small muted">Started ${fmtDT(t.startedAt)}</div>` : "";
+  if (t.status === "In Progress") {
+    const base = t.workMs || 0, res = t.lastResumeAt ? toDate(t.lastResumeAt).getTime() : Date.now();
+    return `<div class="timer-box"><span class="live-timer" data-base="${base}" data-res="${res}">${clock(base + Date.now() - res)}</span>
+      ${can ? `<button class="btn-complete" data-act="complete" data-id="${t.id}">✓ Complete</button>` : ""}</div>${started}`;
+  }
+  if (!can) return started || '<span class="muted small">Not started</span>';
+  return `<button class="btn-start" data-act="start" data-id="${t.id}">▶ ${t.status === "On Hold" ? "Resume" : "Start"}</button>${started}`;
+}
+function clock(ms) { const s = Math.max(0, Math.floor(ms / 1000)); const p = (n) => String(n).padStart(2, "0"); return `${p(Math.floor(s / 3600))}:${p(Math.floor(s / 60) % 60)}:${p(s % 60)}`; }
+function tickTimers() { document.querySelectorAll(".live-timer").forEach((el) => { el.textContent = clock(Number(el.dataset.base) + Date.now() - Number(el.dataset.res)); }); }
+setInterval(tickTimers, 1000);
 
 function renderDone() {
   const q = $("doneSearch").value.trim().toLowerCase();
@@ -458,7 +487,7 @@ function renderDone() {
     const late = t.due && toDate(t.completedAt) && toDate(t.completedAt) > new Date(t.due + "T23:59:59");
     return `<tr>
       <td>${shortId(t.id)}</td>
-      <td class="title-cell"><b>${esc(t.title)}</b>${t.notes ? `<div class="desc">📝 ${esc(t.notes)}</div>` : ""}</td>
+      <td class="title-cell"><b>${esc(t.title)}</b>${t.desc ? `<div class="desc">${esc(t.desc)}</div>` : ""}${t.notes ? `<div class="desc">📝 ${esc(t.notes)}</div>` : ""}</td>
       <td>${esc(projects[t.projectId]?.name || t.projectName || "")}</td>
       <td>${esc(userName(t.assigneeId))}<div class="small muted">by ${esc(userName(t.assignedById))}</div></td>
       <td>${esc(t.due || "")}</td>
@@ -473,6 +502,7 @@ function renderDone() {
 }
 
 $("doneTable").onclick = (e) => $("taskTable").onclick(e);
+$("ongoingTable").onclick = (e) => $("taskTable").onclick(e);
 $("taskTable").onclick = async (e) => {
   const b = e.target.closest("button[data-act]"); if (!b) return;
   const t = tasks[b.dataset.id]; if (!t) return;
@@ -664,7 +694,7 @@ function openProjectModal(p) {
 $("projectForm").onsubmit = async (e) => {
   e.preventDefault();
   const client = $("pClient").value.trim();
-  const name = $("pLlc").value.trim() || client;
+  const name = projName({ clientName: client, llcName: $("pLlc").value.trim() });
   if (!client) return;
   const sameClient = Object.values(projects).filter((p) => p.id !== editingProjectId && p.active !== false &&
     clientKey(projectDetails[p.id]?.clientName) === clientKey(client));

@@ -293,3 +293,10 @@ tr.ongoing td { background: #faf7ff; }
   dialog { width: calc(100vw - 24px); max-width: none; }
   .invite-form input[type=email] { min-width: 0; }
 }
+
+/* v8: start / complete timer */
+.btn-start, .btn-complete { padding: 6px 12px; font-size: 12.5px; font-weight: 700; border: 0; border-radius: 10px; color: #fff; cursor: pointer; white-space: nowrap; }
+.btn-start { background: linear-gradient(180deg, #ff9a3c, #f07400); box-shadow: 0 3px 0 #b85600, 0 8px 14px -6px rgba(240,116,0,.6); }
+.btn-complete { background: linear-gradient(180deg, #34c77b, #15a35a); box-shadow: 0 3px 0 #0d7a42, 0 8px 14px -6px rgba(21,163,90,.6); }
+.timer-box { display: flex; align-items: center; gap: 8px; }
+.live-timer { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 700; font-size: 14px; color: #f07400; }
