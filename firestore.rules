@@ -62,7 +62,8 @@ service cloud.firestore {
       }
       allow read: if isSenior()
         || (isSup() && mgr(resource.data))
-        || (isActive() && resource.data.assigneeId == request.auth.uid);
+        || (isActive() && (resource.data.assigneeId == request.auth.uid
+            || request.auth.uid in resource.data.get('assigneeIds', [])));
 
       // Senior assigns to anyone; a supervisor only to the officers they manage (main or second manager).
       allow create: if isStaff()
@@ -75,7 +76,8 @@ service cloud.firestore {
       allow update: if isSenior()
         || (isSup() && mgr(resource.data) && mgr(request.resource.data)
             && myOfficer(request.resource.data.assigneeId))
-        || (isActive() && resource.data.assigneeId == request.auth.uid
+        || (isActive() && (resource.data.assigneeId == request.auth.uid
+                || request.auth.uid in resource.data.get('assigneeIds', []))
             && request.resource.data.diff(resource.data).affectedKeys()
                  .hasOnly(['status', 'notes', 'startedAt', 'completedAt', 'workMs',
                            'lastResumeAt', 'history', 'updatedAt']));

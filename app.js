@@ -332,8 +332,8 @@ function startApp() {
   const qs = isSenior()
     ? [col]
     : isSup()
-      ? [query(col, where("supervisorId", "==", me.uid)), query(col, where("managerIds", "array-contains", me.uid)), query(col, where("assigneeId", "==", me.uid))]
-      : [query(col, where("assigneeId", "==", me.uid))];
+      ? [query(col, where("supervisorId", "==", me.uid)), query(col, where("managerIds", "array-contains", me.uid)), query(col, where("assigneeId", "==", me.uid)), query(col, where("assigneeIds", "array-contains", me.uid))]
+      : [query(col, where("assigneeId", "==", me.uid)), query(col, where("assigneeIds", "array-contains", me.uid))];
   const buckets = qs.map(() => ({}));
   setupNotifications();
   qs.forEach((q, i) => unsubs.push(onSnapshot(q, (s) => {
@@ -414,9 +414,17 @@ function openMsel(btn, options, selected, onChange, onDone) {
 }
 document.addEventListener("mousedown", (e) => { if (mselOpen && !mselOpen.pop.contains(e.target) && !e.target.closest(".msel-btn")) closeMsel(); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && mselOpen) { e.preventDefault(); closeMsel(); } });
+// a task can have several people on it (one shared row, one shared timer)
+const assigneesOf = (t) => (Array.isArray(t?.assigneeIds) && t.assigneeIds.length ? t.assigneeIds : [t?.assigneeId]).filter(Boolean);
+const isAssignee = (t, uid = me?.uid) => assigneesOf(t).includes(uid);
 function managerIdsFor(assigneeId, supId, assignerId) {
+  const ids = Array.isArray(assigneeId) ? assigneeId : [assigneeId];
   const extra = [assignerId].filter((x) => x && users[x]?.role === "supervisor");
-  return [...new Set([supId, ...managersOf(assigneeId), ...extra].filter(Boolean))];
+  return [...new Set([supId, ...ids.flatMap(managersOf), ...extra].filter(Boolean))];
+}
+function assigneeFields(ids, assignerId) {
+  const supId = supervisorFor(ids[0]);
+  return { assigneeIds: ids, assigneeId: ids[0], supervisorId: supId, managerIds: managerIdsFor(ids, supId, assignerId) };
 }
 const canManageTask = (t) => isSenior() || (isSup() && (t.supervisorId === me.uid || (t.managerIds || []).includes(me.uid)));
 let mgrSyncKey = "";
@@ -425,7 +433,7 @@ function syncTaskManagers() {
   const key = Object.values(users).map((u) => u.uid + managersOf(u.uid).join(",")).join("|") + Object.keys(tasks).length;
   if (key === mgrSyncKey) return; mgrSyncKey = key;
   Object.values(tasks).forEach((t) => {
-    const want = managerIdsFor(t.assigneeId, t.supervisorId, t.assignedById);
+    const want = managerIdsFor(assigneesOf(t), t.supervisorId, t.assignedById);
     const have = t.managerIds || [];
     if (want.length !== have.length || want.some((x) => !have.includes(x)))
       updateDoc(doc(db, "tasks", t.id), { managerIds: want }).catch(() => {});
@@ -464,7 +472,7 @@ function filteredTasks(mode = "open") {
   const to = $("fTo").value ? new Date($("fTo").value + "T23:59:59") : null;
   return Object.values(tasks).filter((t) => {
     if (p && t.projectId !== p) return false;
-    if (who && t.assigneeId !== who) return false;
+    if (who && !isAssignee(t, who)) return false;
     if (mode === "open" && t.status === "Completed" && !isOngoing(t)) return false;
     if (mode === "done" && (t.status !== "Completed" || isOngoing(t))) return false;
     if (mode === "open" && isOngoing(t) && t.status === "Completed") { /* ongoing never completes */ }
@@ -489,7 +497,7 @@ function renderTasks() {
   const projOpts = activeProjects().map((p) => [p.id, projects[p.id].name]);
   const peopleOpts = assignableUsers().sort((a, b) => a.name.localeCompare(b.name)).map((u) => [u.uid, u.name]);
   const row = (t) => {
-    const mine = t.assigneeId === me.uid;
+    const mine = isAssignee(t);
     const canManage = canManageTask(t);
     const og = isOngoing(t);
     const pOpts = projOpts.some(([v]) => v === t.projectId) ? projOpts : [[t.projectId, projects[t.projectId]?.name || t.projectName || "(removed)"], ...projOpts];
@@ -503,8 +511,7 @@ function renderTasks() {
         <div class="desc">${ed("task", t.id, "desc", t.desc, t.desc ? esc(t.desc) : '<span class="ph">Add details</span>', "textarea", canManage)}</div>
         <div class="desc">📝 ${ed("task", t.id, "notes", t.notes, t.notes ? esc(t.notes) : '<span class="ph">Add note</span>', "textarea", canManage || mine)}</div></td>
       <td>${sel("task", t.id, "projectId", t.projectId, pOpts, canManage)}</td>
-      <td>${mselBtn("asg:" + t.id, [t.assigneeId], canManage)}<div class="small muted">by ${esc(userName(t.assignedById))}</div></td>
-      <td>${og ? '<span class="p-high">High</span>' : sel("task", t.id, "priority", t.priority || "Medium", [["High", "High"], ["Medium", "Medium"], ["Low", "Low"]], canManage, `data-pri="${esc(t.priority || "Medium")}"`)}</td>
+      <td>${mselBtn("asg:" + t.id, assigneesOf(t), canManage)}<div class="small muted">by ${esc(userName(t.assignedById))}</div></td>
       <td>${og ? "" : dateInl("task", t.id, "due", t.due, canManage)}${isOverdue(t) ? '<div class="od-wrap"><span class="badge s-overdue">Overdue</span></div>' : ""}</td>
       <td>${canManage ? sel("task", t.id, "recurrence", t.recurrence || "", [["", "One-time"], ["Daily", "Ongoing · Daily"], ["Weekly", "Ongoing · Weekly"], ["Monthly", "Ongoing · Monthly"]], true, `data-og="${og ? 1 : 0}"`)
         : og ? `<span class="badge s-ongoing">Ongoing · ${esc(t.recurrence)}</span>` : '<span class="muted small">One-time</span>'}</td>
@@ -542,7 +549,7 @@ setInterval(tickTimers, 1000);
 function renderDone() {
   const q = $("doneSearch").value.trim().toLowerCase();
   const hay = (t) => [shortId(t.id), t.title, t.desc, t.notes, projects[t.projectId]?.name, t.projectName, projLabel(t.projectId),
-    userName(t.assigneeId), userName(t.assignedById), t.priority, t.due].join(" ").toLowerCase();
+    assigneesOf(t).map(userName).join(" "), userName(t.assignedById), t.priority, t.due].join(" ").toLowerCase();
   const list = filteredTasks("done").filter((t) => !q || q.split(/\s+/).every((w) => hay(t).includes(w)));
   $("doneEmpty").classList.toggle("hidden", list.length > 0);
   $("doneEmpty").textContent = q ? `No completed tasks match "${$("doneSearch").value.trim()}".` : "No completed tasks for these filters.";
@@ -553,7 +560,7 @@ function renderDone() {
       <td>${shortId(t.id)}</td>
       <td class="title-cell"><b>${esc(t.title)}</b>${t.desc ? `<div class="desc">${esc(t.desc)}</div>` : ""}${t.notes ? `<div class="desc">📝 ${esc(t.notes)}</div>` : ""}</td>
       <td>${esc(projects[t.projectId]?.name || t.projectName || "")}</td>
-      <td>${esc(userName(t.assigneeId))}<div class="small muted">by ${esc(userName(t.assignedById))}</div></td>
+      <td>${esc(assigneesOf(t).map(userName).join(", "))}<div class="small muted">by ${esc(userName(t.assignedById))}</div></td>
       <td>${esc(t.due || "")}</td>
       <td>${fmtDT(t.assignedAt)}</td><td>${fmtDT(t.startedAt)}</td><td>${fmtDT(t.completedAt)}</td>
       <td><b>${fmtDur(workMs(t))}</b></td>
@@ -638,34 +645,25 @@ $("teamTable").addEventListener("click", (e) => {
     () => updateDoc(doc(db, "users", uid), { managerIds: ids, supervisorId: ids[0] || "", coSupervisorId: "" }).catch((err) => toast(niceErr(err))));
 });
 
-// "Assigned to" checkbox list in task tables: tick more people = a copy of this task for each
-function copyTaskTo(t, assigneeId) {
-  const supId = supervisorFor(assigneeId);
-  return addDoc(collection(db, "tasks"), {
-    title: t.title || "", desc: t.desc || "", projectId: t.projectId, projectName: projects[t.projectId]?.name || t.projectName || "",
-    assigneeId, supervisorId: supId, managerIds: managerIdsFor(assigneeId, supId, me.uid),
-    priority: t.priority || "Medium", due: t.due || "", notes: "", recurrence: t.recurrence || "", estimate: t.estimate || "",
-    status: "Not Started", assignedById: me.uid, assignedAt: serverTimestamp(), updatedAt: serverTimestamp(),
-    startedAt: null, completedAt: null, workMs: 0, lastResumeAt: null,
-    history: [{ at: Timestamp.now(), by: me.uid, action: `Assigned to ${userName(assigneeId)}` }]
-  });
-}
+// "Assigned to" checkbox list in task tables: everyone ticked shares this one task
 document.addEventListener("click", (e) => {
   const b = e.target.closest(".msel-btn[data-msel^='asg:']"); if (!b) return;
   if (mselOpen) { closeMsel(); return; }
   const t = tasks[b.dataset.msel.slice(4)]; if (!t) return;
+  const cur = assigneesOf(t);
   const opts = assignableUsers().sort((a, c) => a.name.localeCompare(c.name)).map((u) => [u.uid, u.name, u.designation || ROLE_LABEL[u.role]]);
-  if (!opts.some(([v]) => v === t.assigneeId)) opts.unshift([t.assigneeId, userName(t.assigneeId), ""]);
-  let ids = [t.assigneeId];
-  openMsel(b, opts, ids, (next) => { ids = next; b.innerHTML = mselLabel(ids, "– choose –") + '<span class="msel-caret">▾</span>'; },
+  cur.forEach((id) => { if (!opts.some(([v]) => v === id)) opts.unshift([id, userName(id), ""]); });
+  let ids = [...cur];
+  const draw = (x) => (b.innerHTML = mselLabel(x, "– choose –") + '<span class="msel-caret">▾</span>');
+  openMsel(b, opts, ids, (next) => { ids = next; draw(ids); },
     async () => {
-      if (!ids.length || (ids.length === 1 && ids[0] === t.assigneeId)) { b.innerHTML = mselLabel([t.assigneeId]) + '<span class="msel-caret">▾</span>'; return; }
+      if (!ids.length) { draw(cur); toast("At least one person must stay on the task."); return; }
+      if (ids.length === cur.length && ids.every((x) => cur.includes(x))) { draw(cur); return; }
       try {
-        const rest = ids.filter((x) => x !== t.assigneeId);
-        if (!ids.includes(t.assigneeId)) await saveTaskField(t, "assigneeId", rest.shift());
-        for (const a of rest) await copyTaskTo(t, a);
-        toast(rest.length ? `Assigned to ${rest.length} more ${rest.length > 1 ? "people" : "person"}` : "Reassigned");
-      } catch (err) { toast(niceErr(err)); }
+        await updateDoc(doc(db, "tasks", t.id), { ...assigneeFields(ids, t.assignedById), updatedAt: serverTimestamp(),
+          history: arrayUnion({ at: Timestamp.now(), by: me.uid, action: `Assigned to ${ids.map(userName).join(", ")}` }) });
+        toast("Assignees updated");
+      } catch (err) { draw(cur); toast(niceErr(err)); }
     });
 });
 
@@ -686,16 +684,15 @@ function openTaskModal(t) {
   setOptions($("tProject"), activeProjects().map((p) => [p.id, projLabel(p.id)]), null);
   if (!activeProjects().length) { toast("Add a project first (Projects tab)."); return; }
   $("tTitle").value = t?.title || ""; $("tDesc").value = t?.desc || "";
-  if (t) { $("tProject").value = t.projectId; } taskAssignees = t ? [t.assigneeId] : []; drawAssigneeBtn();
-  $("tPriority").value = t?.priority || "Medium"; $("tDue").value = t?.due || ""; $("tNotes").value = t?.notes || "";
+  if (t) { $("tProject").value = t.projectId; } taskAssignees = t ? assigneesOf(t) : []; drawAssigneeBtn();
+  $("tDue").value = t?.due || ""; $("tNotes").value = t?.notes || "";
   $("tType").value = t?.recurrence || ""; $("tEst").value = t?.estimate || ""; syncTaskType();
   $("taskModal").showModal();
 }
 function syncTaskType() {
   const og = !!$("tType").value;
   $("tEstWrap").classList.toggle("hidden", !og);
-  if (og) $("tPriority").value = "High";
-  $("tPriority").disabled = og; $("tDue").disabled = og;
+  $("tDue").disabled = og;
 }
 $("tType").onchange = syncTaskType;
 function supervisorFor(assigneeId) {
@@ -707,32 +704,29 @@ $("taskForm").onsubmit = async (e) => {
   e.preventDefault();
   if (!taskAssignees.length) { toast("Choose at least one person."); return; }
   const projectId = $("tProject").value;
-  const mk = (assigneeId) => ({
+  const people = [...taskAssignees];
+  const old = editingTaskId ? tasks[editingTaskId] : null;
+  const data = {
     title: $("tTitle").value.trim(), desc: $("tDesc").value.trim(), projectId,
-    projectName: projects[projectId]?.name || "", assigneeId, supervisorId: supervisorFor(assigneeId),
-    managerIds: managerIdsFor(assigneeId, supervisorFor(assigneeId), editingTaskId ? tasks[editingTaskId]?.assignedById : me.uid),
-    priority: $("tType").value ? "High" : $("tPriority").value, due: $("tType").value ? "" : $("tDue").value,
+    projectName: projects[projectId]?.name || "", ...assigneeFields(people, old ? old.assignedById : me.uid),
+    priority: $("tType").value ? "High" : (old?.priority || "Medium"), due: $("tType").value ? "" : $("tDue").value,
     notes: $("tNotes").value.trim(), recurrence: $("tType").value, estimate: $("tType").value ? $("tEst").value.trim() : "",
     updatedAt: serverTimestamp()
-  });
-  const people = [...taskAssignees];
-  const createFor = (assigneeId) => addDoc(collection(db, "tasks"), {
-    ...mk(assigneeId), status: "Not Started", assignedById: me.uid, assignedAt: serverTimestamp(),
-    startedAt: null, completedAt: null, workMs: 0, lastResumeAt: null,
-    history: [{ at: Timestamp.now(), by: me.uid, action: `Assigned to ${userName(assigneeId)}` }]
-  });
+  };
+  const names = people.map(userName).join(", ");
   try {
-    if (editingTaskId) {
-      const assigneeId = people.shift(), data = mk(assigneeId);
-      const old = tasks[editingTaskId];
-      data.history = arrayUnion({ at: Timestamp.now(), by: me.uid,
-        action: old.assigneeId !== assigneeId ? `Edited · reassigned to ${userName(assigneeId)}` : "Edited" });
+    if (old) {
+      const same = people.length === assigneesOf(old).length && people.every((x) => assigneesOf(old).includes(x));
+      data.history = arrayUnion({ at: Timestamp.now(), by: me.uid, action: same ? "Edited" : `Edited · assigned to ${names}` });
       await updateDoc(doc(db, "tasks", editingTaskId), data);
-      for (const a of people) await createFor(a);
-      toast(people.length ? `Task updated · also assigned to ${people.length} more` : "Task updated");
+      toast("Task updated");
     } else {
-      for (const a of people) await createFor(a);
-      toast(people.length > 1 ? `Task assigned to ${people.length} people` : "Task assigned");
+      await addDoc(collection(db, "tasks"), {
+        ...data, status: "Not Started", assignedById: me.uid, assignedAt: serverTimestamp(),
+        startedAt: null, completedAt: null, workMs: 0, lastResumeAt: null,
+        history: [{ at: Timestamp.now(), by: me.uid, action: `Assigned to ${names}` }]
+      });
+      toast(people.length > 1 ? `Task assigned to ${names}` : "Task assigned");
     }
     $("taskModal").close();
   } catch (err) { toast(niceErr(err)); }
@@ -757,7 +751,7 @@ function renderDashboard() {
   $("kpis").innerHTML = kpi.map(([l, n]) => `<div class="card glass ${tone[l] || ""}"><div class="num">${n}</div><div class="lbl">${l}</div></div>`).join("");
 
   const people = {};
-  all.forEach((t) => (people[t.assigneeId] ??= []).push(t));
+  all.forEach((t) => assigneesOf(t).forEach((id) => (people[id] ??= []).push(t)));
   $("byPerson").querySelector("tbody").innerHTML = Object.entries(people)
     .sort((a, b) => userName(a[0]).localeCompare(userName(b[0])))
     .map(([uid, ts]) => {
@@ -781,7 +775,7 @@ function renderDashboard() {
   $("overdueTable").querySelector("tbody").innerHTML = all.filter(isOverdue)
     .sort((a, b) => a.due.localeCompare(b.due))
     .map((t) => `<tr class="overdue"><td>${esc(t.title)}</td><td>${esc(projects[t.projectId]?.name || t.projectName)}</td>
-      <td>${esc(userName(t.assigneeId))}</td><td>${esc(t.due)}</td><td>${esc(stLabel(t.status))}</td></tr>`).join("")
+      <td>${esc(assigneesOf(t).map(userName).join(", "))}</td><td>${esc(t.due)}</td><td>${esc(stLabel(t.status))}</td></tr>`).join("")
     || `<tr><td colspan="5" class="muted">Nothing overdue 🎉</td></tr>`;
 }
 
@@ -1037,7 +1031,7 @@ $("exportBtn").onclick = () => {
   const rows = [["ID", "Task", "Description", "Project", "Assigned to", "Assigned by", "Supervisor", "Priority", "Due",
     "Status", "Overdue", "Assigned at", "Started at", "Completed at", "Time taken (hours)", "Notes"]];
   filteredTasks(currentTab === "completed" ? "done" : "open").forEach((t) => rows.push([
-    shortId(t.id), t.title, t.desc, projects[t.projectId]?.name || t.projectName, userName(t.assigneeId),
+    shortId(t.id), t.title, t.desc, projects[t.projectId]?.name || t.projectName, assigneesOf(t).map(userName).join(", "),
     userName(t.assignedById), userName(t.supervisorId), t.priority, t.due, stLabel(t.status) + (isOngoing(t) ? ` (Ongoing · ${t.recurrence})` : ""), isOverdue(t) ? "Yes" : "No",
     toDate(t.assignedAt)?.toLocaleString() || "", toDate(t.startedAt)?.toLocaleString() || "",
     toDate(t.completedAt)?.toLocaleString() || "", isOngoing(t) ? `Est. ${t.estimate || ""}` : (workMs(t) / 3600000).toFixed(2), t.notes
@@ -1123,8 +1117,8 @@ function notifyNewAssignments(snap) {
   const fresh = [];
   snap.docChanges().forEach((ch) => {
     const t = { id: ch.doc.id, ...ch.doc.data() };
-    if (t.assigneeId !== me.uid || t.status === "Completed") return;
-    const key = t.id + "|" + t.assigneeId;
+    if (!isAssignee(t) || t.status === "Completed") return;
+    const key = t.id + "|" + me.uid;
     if (seen[key]) return;
     seen[key] = 1;
     // only alert for tasks given by someone else, and not the old backlog on first launch
