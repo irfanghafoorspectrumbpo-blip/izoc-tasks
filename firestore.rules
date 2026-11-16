@@ -53,27 +53,33 @@ service cloud.firestore {
 
     // Tasks
     match /tasks/{tid} {
+      function mgr(d) { return d.supervisorId == request.auth.uid || request.auth.uid in d.get('managerIds', []); }
+      function myOfficer(aid) {
+        return aid == request.auth.uid
+          || get(/databases/$(database)/documents/users/$(aid)).data.supervisorId == request.auth.uid
+          || get(/databases/$(database)/documents/users/$(aid)).data.get('coSupervisorId', '') == request.auth.uid;
+      }
       allow read: if isSenior()
-        || (isSup() && resource.data.supervisorId == request.auth.uid)
+        || (isSup() && mgr(resource.data))
         || (isActive() && resource.data.assigneeId == request.auth.uid);
 
-      // Senior assigns to anyone; a supervisor only to their own team (supervisorId = themself).
+      // Senior assigns to anyone; a supervisor only to the officers they manage (main or second manager).
       allow create: if isStaff()
         && request.resource.data.assignedById == request.auth.uid
         && request.resource.data.status == 'Not Started'
-        && (isSenior() || request.resource.data.supervisorId == request.auth.uid);
+        && (isSenior() || (mgr(request.resource.data) && myOfficer(request.resource.data.assigneeId)));
 
       // Senior edits anything; a supervisor edits their team's tasks;
       // the person doing the task can only change status, timing and notes.
       allow update: if isSenior()
-        || (isSup() && resource.data.supervisorId == request.auth.uid
-                    && request.resource.data.supervisorId == request.auth.uid)
+        || (isSup() && mgr(resource.data) && mgr(request.resource.data)
+            && myOfficer(request.resource.data.assigneeId))
         || (isActive() && resource.data.assigneeId == request.auth.uid
             && request.resource.data.diff(resource.data).affectedKeys()
                  .hasOnly(['status', 'notes', 'startedAt', 'completedAt', 'workMs',
                            'lastResumeAt', 'history', 'updatedAt']));
 
-      allow delete: if isSenior() || (isSup() && resource.data.supervisorId == request.auth.uid);
+      allow delete: if isSenior() || (isSup() && mgr(resource.data));
     }
   }
 }

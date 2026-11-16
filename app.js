@@ -168,7 +168,7 @@ async function saveField(kind, id, field, value, type) {
   }
   if (kind === "user") {
     const upd = { [field]: value };
-    if (field === "designation" && value !== "Ecommerce Officer") upd.supervisorId = "";
+    if (field === "designation" && value !== "Ecommerce Officer") { upd.supervisorId = ""; upd.coSupervisorId = ""; }
     return updateDoc(doc(db, "users", id), upd);
   }
 }
@@ -177,7 +177,7 @@ async function saveTaskField(t, field, value) {
   if (field === "status") return changeStatus(t, value);
   const upd = { [field]: value, updatedAt: serverTimestamp() };
   let action = `Edited ${field}`;
-  if (field === "assigneeId") { upd.supervisorId = supervisorFor(value); action = `Reassigned to ${userName(value)}`; }
+  if (field === "assigneeId") { upd.supervisorId = supervisorFor(value); upd.managerIds = managerIdsFor(value, upd.supervisorId, t.assignedById); action = `Reassigned to ${userName(value)}`; }
   if (field === "projectId") { upd.projectName = projects[value]?.name || ""; action = `Project → ${projects[value]?.name || ""}`; }
   if (field === "priority") action = `Priority → ${value}`;
   if (field === "due") action = `Due date → ${value || "none"}`;
@@ -332,7 +332,7 @@ function startApp() {
   const qs = isSenior()
     ? [col]
     : isSup()
-      ? [query(col, where("supervisorId", "==", me.uid)), query(col, where("assigneeId", "==", me.uid))]
+      ? [query(col, where("supervisorId", "==", me.uid)), query(col, where("managerIds", "array-contains", me.uid)), query(col, where("assigneeId", "==", me.uid))]
       : [query(col, where("assigneeId", "==", me.uid))];
   const buckets = qs.map(() => ({}));
   setupNotifications();
@@ -357,14 +357,37 @@ function switchTab(tab) {
   $("newTaskBtn").classList.toggle("hidden", !["tasks", "ongoing"].includes(tab) || !isStaff());
 }
 
-function renderAll() { syncProjectNames(); fillFilters(); renderTasks(); renderDashboard(); renderProjects(); renderTeam(); }
+function renderAll() { syncProjectNames(); syncTaskManagers(); fillFilters(); renderTasks(); renderDashboard(); renderProjects(); renderTeam(); }
 
 // people this user may assign to
 function assignableUsers() {
   const active = Object.values(users).filter((u) => ["senior", "supervisor", "member"].includes(u.role));
   if (isSenior()) return active;
-  if (isSup()) return active.filter((u) => u.uid === me.uid || (desigOf(u) === "Ecommerce Officer" && u.supervisorId === me.uid));
+  if (isSup()) return active.filter((u) => u.uid === me.uid || managersOf(u.uid).includes(me.uid));
   return [];
+}
+// an officer can be managed by two people: main (supervisorId) + second (coSupervisorId)
+function managersOf(uid) {
+  const u = users[uid];
+  if (!u || desigOf(u) !== "Ecommerce Officer") return [];
+  return [u.supervisorId, u.coSupervisorId].filter(Boolean);
+}
+function managerIdsFor(assigneeId, supId, assignerId) {
+  const extra = [assignerId].filter((x) => x && users[x]?.role === "supervisor");
+  return [...new Set([supId, ...managersOf(assigneeId), ...extra].filter(Boolean))];
+}
+const canManageTask = (t) => isSenior() || (isSup() && (t.supervisorId === me.uid || (t.managerIds || []).includes(me.uid)));
+let mgrSyncKey = "";
+function syncTaskManagers() {
+  if (!isSenior() || !Object.keys(users).length) return;
+  const key = Object.values(users).map((u) => u.uid + (u.supervisorId || "") + (u.coSupervisorId || "")).join("|") + Object.keys(tasks).length;
+  if (key === mgrSyncKey) return; mgrSyncKey = key;
+  Object.values(tasks).forEach((t) => {
+    const want = managerIdsFor(t.assigneeId, t.supervisorId, t.assignedById);
+    const have = t.managerIds || [];
+    if (want.length !== have.length || want.some((x) => !have.includes(x)))
+      updateDoc(doc(db, "tasks", t.id), { managerIds: want }).catch(() => {});
+  });
 }
 const activeProjects = () => Object.values(projects).filter((p) => p.active !== false).sort((a, b) => a.name.localeCompare(b.name));
 
@@ -425,7 +448,7 @@ function renderTasks() {
   const peopleOpts = assignableUsers().sort((a, b) => a.name.localeCompare(b.name)).map((u) => [u.uid, u.name]);
   const row = (t) => {
     const mine = t.assigneeId === me.uid;
-    const canManage = isSenior() || (isSup() && t.supervisorId === me.uid);
+    const canManage = canManageTask(t);
     const og = isOngoing(t);
     const pOpts = projOpts.some(([v]) => v === t.projectId) ? projOpts : [[t.projectId, projects[t.projectId]?.name || t.projectName || "(removed)"], ...projOpts];
     const uOpts = peopleOpts.some(([v]) => v === t.assigneeId) ? peopleOpts : [[t.assigneeId, userName(t.assigneeId)], ...peopleOpts];
@@ -482,7 +505,7 @@ function renderDone() {
   $("doneEmpty").classList.toggle("hidden", list.length > 0);
   $("doneEmpty").textContent = q ? `No completed tasks match "${$("doneSearch").value.trim()}".` : "No completed tasks for these filters.";
   $("doneTable").querySelector("tbody").innerHTML = list.map((t) => {
-    const canManage = isSenior() || (isSup() && t.supervisorId === me.uid);
+    const canManage = canManageTask(t);
     const late = t.due && toDate(t.completedAt) && toDate(t.completedAt) > new Date(t.due + "T23:59:59");
     return `<tr>
       <td>${shortId(t.id)}</td>
@@ -585,7 +608,7 @@ function syncTaskType() {
 $("tType").onchange = syncTaskType;
 function supervisorFor(assigneeId) {
   const a = users[assigneeId];
-  if (desigOf(a) === "Ecommerce Officer" && a.supervisorId) return isSup() ? me.uid : a.supervisorId;
+  if (desigOf(a) === "Ecommerce Officer" && a.supervisorId) return a.supervisorId;
   return me.uid; // assigning to a supervisor or to yourself: the assigner manages it
 }
 $("taskForm").onsubmit = async (e) => {
@@ -594,6 +617,7 @@ $("taskForm").onsubmit = async (e) => {
   const data = {
     title: $("tTitle").value.trim(), desc: $("tDesc").value.trim(), projectId,
     projectName: projects[projectId]?.name || "", assigneeId, supervisorId: supervisorFor(assigneeId),
+    managerIds: managerIdsFor(assigneeId, supervisorFor(assigneeId), editingTaskId ? tasks[editingTaskId]?.assignedById : me.uid),
     priority: $("tType").value ? "High" : $("tPriority").value, due: $("tType").value ? "" : $("tDue").value,
     notes: $("tNotes").value.trim(), recurrence: $("tType").value, estimate: $("tType").value ? $("tEst").value.trim() : "",
     updatedAt: serverTimestamp()
@@ -644,7 +668,7 @@ function renderDashboard() {
       const done = ts.filter((t) => t.status === "Completed");
       const a = done.length ? done.reduce((s, t) => s + workMs(t), 0) / done.length : 0;
       const od = ts.filter(isOverdue).length;
-      return `<tr><td>${esc(userName(uid))}</td><td>${esc(users[uid]?.designation || ROLE_LABEL[users[uid]?.role] || "")}</td><td>${esc(users[uid]?.supervisorId ? userName(users[uid].supervisorId) : "")}</td>
+      return `<tr><td>${esc(userName(uid))}</td><td>${esc(users[uid]?.designation || ROLE_LABEL[users[uid]?.role] || "")}</td><td>${esc(managersOf(uid).map(userName).join(", "))}</td>
         <td>${c("Not Started")}</td><td>${c("In Progress")}</td><td>${c("On Hold")}</td>
         <td>${ts.filter((t) => t.status === "Completed" && toDate(t.completedAt)?.getTime() > weekAgo).length}</td>
         <td>${fmtDur(a) || "–"}</td><td>${od ? `<span class="badge s-overdue">${od}</span>` : 0}</td></tr>`;
@@ -852,7 +876,8 @@ function renderTeam() {
       <td>${dateInl("user", u.uid, "doj", u.doj)}</td>
       <td>${sel("user", u.uid, "designation", u.designation || "", [["", "– choose –"], ...DESIGNATIONS.map((d) => [d, d])])}</td>
       <td>${sel("user", u.uid, "role", u.role, ["member", "supervisor", "senior"].map((r) => [r, ROLE_LABEL[r]]), !self)}</td>
-      <td>${officer ? sel("user", u.uid, "supervisorId", u.supervisorId || "", [["", "– choose –"], ...pool.map((s) => [s.uid, s.name])]) : '<span class="muted small">—</span>'}</td>
+      <td>${officer ? `<div class="mgr2">${sel("user", u.uid, "supervisorId", u.supervisorId || "", [["", "– choose –"], ...pool.map((s) => [s.uid, s.name])])}
+        <div class="muted small">Also assigned by</div>${sel("user", u.uid, "coSupervisorId", u.coSupervisorId || "", [["", "– none –"], ...pool.filter((s) => s.uid !== u.supervisorId).map((s) => [s.uid, s.name])])}</div>` : '<span class="muted small">—</span>'}</td>
       <td>${self ? "" : `<button class="secondary small-btn" data-uact="remove" data-id="${u.uid}">Remove access</button>`}</td>
     </tr>`;
   }).join("");
