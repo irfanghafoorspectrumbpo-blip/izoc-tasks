@@ -369,9 +369,51 @@ function assignableUsers() {
 // an officer can be managed by two people: main (supervisorId) + second (coSupervisorId)
 function managersOf(uid) {
   const u = users[uid];
-  if (!u || desigOf(u) !== "Ecommerce Officer") return [];
+  if (!u) return [];
+  if (Array.isArray(u.managerIds)) return u.managerIds.filter(Boolean);
+  if (desigOf(u) !== "Ecommerce Officer") return [];
   return [u.supervisorId, u.coSupervisorId].filter(Boolean);
 }
+// ---------- checkbox multi-select (compact button + floating list) ----------
+function mselLabel(ids, empty = "– choose –") {
+  const n = ids.map(userName).filter(Boolean);
+  return n.length ? esc(n[0]) + (n.length > 1 ? ` <span class="msel-more">+${n.length - 1}</span>` : "") : `<span class="muted">${empty}</span>`;
+}
+function mselBtn(key, ids, can = true, empty) {
+  const title = esc(ids.map(userName).join(", "));
+  return can ? `<button type="button" class="msel-btn" data-msel="${esc(key)}" title="${title}">${mselLabel(ids, empty)}<span class="msel-caret">▾</span></button>`
+    : `<span title="${title}">${mselLabel(ids, "—")}</span>`;
+}
+let mselOpen = null; // { pop, onDone }
+function closeMsel() { if (!mselOpen) return; const m = mselOpen; mselOpen = null; m.pop.remove(); inlineActive = false; m.onDone?.(); if (needRender) scheduleRender(); }
+function openMsel(btn, options, selected, onChange, onDone) {
+  closeMsel();
+  const host = btn.closest("dialog") || document.body;
+  const pop = document.createElement("div"); pop.className = "msel-pop";
+  const chosen = new Set(selected);
+  pop.innerHTML = `<input class="msel-search" placeholder="Search…" />` + options.map(([v, l, sub]) =>
+    `<label class="msel-item"><input type="checkbox" value="${esc(v)}" ${chosen.has(v) ? "checked" : ""}/> <span>${esc(l)}${sub ? ` <small class="muted">${esc(sub)}</small>` : ""}</span></label>`).join("")
+    + (options.length ? "" : `<div class="muted small">No one available.</div>`);
+  host.appendChild(pop);
+  const r = btn.getBoundingClientRect(), hr = host === document.body ? { left: 0, top: 0 } : host.getBoundingClientRect();
+  pop.style.position = host === document.body ? "fixed" : "absolute";
+  const left = Math.min(r.left, window.innerWidth - 270);
+  pop.style.left = (left - hr.left + (host === document.body ? 0 : host.scrollLeft)) + "px";
+  const below = r.bottom + 4, h = Math.min(320, 40 + options.length * 34);
+  const top = below + h > window.innerHeight ? Math.max(8, r.top - h - 4) : below;
+  pop.style.top = (top - hr.top + (host === document.body ? 0 : host.scrollTop)) + "px";
+  inlineActive = true;
+  mselOpen = { pop, onDone };
+  pop.querySelector(".msel-search").oninput = (e) => { const q = e.target.value.toLowerCase();
+    pop.querySelectorAll(".msel-item").forEach((l) => l.classList.toggle("hidden", !l.textContent.toLowerCase().includes(q))); };
+  pop.addEventListener("change", () => {
+    const ids = [...pop.querySelectorAll("input[type=checkbox]:checked")].map((c) => c.value);
+    onChange(ids);
+  });
+  setTimeout(() => pop.querySelector(".msel-search").focus(), 0);
+}
+document.addEventListener("mousedown", (e) => { if (mselOpen && !mselOpen.pop.contains(e.target) && !e.target.closest(".msel-btn")) closeMsel(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && mselOpen) { e.preventDefault(); closeMsel(); } });
 function managerIdsFor(assigneeId, supId, assignerId) {
   const extra = [assignerId].filter((x) => x && users[x]?.role === "supervisor");
   return [...new Set([supId, ...managersOf(assigneeId), ...extra].filter(Boolean))];
@@ -380,7 +422,7 @@ const canManageTask = (t) => isSenior() || (isSup() && (t.supervisorId === me.ui
 let mgrSyncKey = "";
 function syncTaskManagers() {
   if (!isSenior() || !Object.keys(users).length) return;
-  const key = Object.values(users).map((u) => u.uid + (u.supervisorId || "") + (u.coSupervisorId || "")).join("|") + Object.keys(tasks).length;
+  const key = Object.values(users).map((u) => u.uid + managersOf(u.uid).join(",")).join("|") + Object.keys(tasks).length;
   if (key === mgrSyncKey) return; mgrSyncKey = key;
   Object.values(tasks).forEach((t) => {
     const want = managerIdsFor(t.assigneeId, t.supervisorId, t.assignedById);
@@ -584,17 +626,36 @@ function showHistory(t) {
 }
 $("historyClose").onclick = () => $("historyModal").close();
 
+// "Managed by" checkbox list in Team tab
+$("teamTable").addEventListener("click", (e) => {
+  const b = e.target.closest(".msel-btn[data-msel^='mgr:']"); if (!b) return;
+  if (mselOpen) { closeMsel(); return; }
+  const uid = b.dataset.msel.slice(4);
+  const pool = Object.values(users).filter((x) => x.role !== "pending" && x.uid !== uid).sort((a, c) => a.name.localeCompare(c.name))
+    .map((x) => [x.uid, x.name, desigOf(x) + (x.role === "member" ? " · Task Access" : "")]);
+  let ids = managersOf(uid);
+  openMsel(b, pool, ids, (next) => { ids = next; b.innerHTML = mselLabel(ids) + '<span class="msel-caret">▾</span>'; },
+    () => updateDoc(doc(db, "users", uid), { managerIds: ids, supervisorId: ids[0] || "", coSupervisorId: "" }).catch((err) => toast(niceErr(err))));
+});
+
 // ---------- task modal ----------
+let taskAssignees = [];
+function drawAssigneeBtn() { $("tAssigneeBtn").innerHTML = mselLabel(taskAssignees, "– choose people –") + '<span class="msel-caret">▾</span>';
+  $("tAssigneeBtn").title = taskAssignees.map(userName).join(", "); }
+$("tAssigneeBtn").onclick = (e) => {
+  if (mselOpen) { closeMsel(); return; }
+  const opts = assignableUsers().sort((a, b) => a.name.localeCompare(b.name)).map((u) => [u.uid, u.name, u.designation || ROLE_LABEL[u.role]]);
+  openMsel(e.currentTarget, opts, taskAssignees, (ids) => { taskAssignees = ids; drawAssigneeBtn(); });
+};
 $("newTaskBtn").onclick = () => openTaskModal(null);
 $("taskCancel").onclick = () => $("taskModal").close();
 function openTaskModal(t) {
   editingTaskId = t?.id || null;
   $("taskModalTitle").textContent = t ? "Edit task" : "New task";
   setOptions($("tProject"), activeProjects().map((p) => [p.id, projLabel(p.id)]), null);
-  setOptions($("tAssignee"), assignableUsers().sort((a, b) => a.name.localeCompare(b.name)).map((u) => [u.uid, `${u.name} (${u.designation || ROLE_LABEL[u.role]})`]), null);
   if (!activeProjects().length) { toast("Add a project first (Projects tab)."); return; }
   $("tTitle").value = t?.title || ""; $("tDesc").value = t?.desc || "";
-  if (t) { $("tProject").value = t.projectId; $("tAssignee").value = t.assigneeId; }
+  if (t) { $("tProject").value = t.projectId; } taskAssignees = t ? [t.assigneeId] : []; drawAssigneeBtn();
   $("tPriority").value = t?.priority || "Medium"; $("tDue").value = t?.due || ""; $("tNotes").value = t?.notes || "";
   $("tType").value = t?.recurrence || ""; $("tEst").value = t?.estimate || ""; syncTaskType();
   $("taskModal").showModal();
@@ -613,29 +674,34 @@ function supervisorFor(assigneeId) {
 }
 $("taskForm").onsubmit = async (e) => {
   e.preventDefault();
-  const assigneeId = $("tAssignee").value, projectId = $("tProject").value;
-  const data = {
+  if (!taskAssignees.length) { toast("Choose at least one person."); return; }
+  const projectId = $("tProject").value;
+  const mk = (assigneeId) => ({
     title: $("tTitle").value.trim(), desc: $("tDesc").value.trim(), projectId,
     projectName: projects[projectId]?.name || "", assigneeId, supervisorId: supervisorFor(assigneeId),
     managerIds: managerIdsFor(assigneeId, supervisorFor(assigneeId), editingTaskId ? tasks[editingTaskId]?.assignedById : me.uid),
     priority: $("tType").value ? "High" : $("tPriority").value, due: $("tType").value ? "" : $("tDue").value,
     notes: $("tNotes").value.trim(), recurrence: $("tType").value, estimate: $("tType").value ? $("tEst").value.trim() : "",
     updatedAt: serverTimestamp()
-  };
+  });
+  const people = [...taskAssignees];
+  const createFor = (assigneeId) => addDoc(collection(db, "tasks"), {
+    ...mk(assigneeId), status: "Not Started", assignedById: me.uid, assignedAt: serverTimestamp(),
+    startedAt: null, completedAt: null, workMs: 0, lastResumeAt: null,
+    history: [{ at: Timestamp.now(), by: me.uid, action: `Assigned to ${userName(assigneeId)}` }]
+  });
   try {
     if (editingTaskId) {
+      const assigneeId = people.shift(), data = mk(assigneeId);
       const old = tasks[editingTaskId];
       data.history = arrayUnion({ at: Timestamp.now(), by: me.uid,
         action: old.assigneeId !== assigneeId ? `Edited · reassigned to ${userName(assigneeId)}` : "Edited" });
       await updateDoc(doc(db, "tasks", editingTaskId), data);
-      toast("Task updated");
+      for (const a of people) await createFor(a);
+      toast(people.length ? `Task updated · also assigned to ${people.length} more` : "Task updated");
     } else {
-      await addDoc(collection(db, "tasks"), {
-        ...data, status: "Not Started", assignedById: me.uid, assignedAt: serverTimestamp(),
-        startedAt: null, completedAt: null, workMs: 0, lastResumeAt: null,
-        history: [{ at: Timestamp.now(), by: me.uid, action: `Assigned to ${userName(assigneeId)}` }]
-      });
-      toast("Task assigned");
+      for (const a of people) await createFor(a);
+      toast(people.length > 1 ? `Task assigned to ${people.length} people` : "Task assigned");
     }
     $("taskModal").close();
   } catch (err) { toast(niceErr(err)); }
@@ -876,8 +942,7 @@ function renderTeam() {
       <td>${dateInl("user", u.uid, "doj", u.doj)}</td>
       <td>${sel("user", u.uid, "designation", u.designation || "", [["", "– choose –"], ...DESIGNATIONS.map((d) => [d, d])])}</td>
       <td>${sel("user", u.uid, "role", u.role, ["member", "supervisor", "senior"].map((r) => [r, ROLE_LABEL[r]]), !self)}</td>
-      <td>${officer ? `<div class="mgr2">${sel("user", u.uid, "supervisorId", u.supervisorId || "", [["", "– choose –"], ...pool.map((s) => [s.uid, s.name])])}
-        <div class="muted small">Also assigned by</div>${sel("user", u.uid, "coSupervisorId", u.coSupervisorId || "", [["", "– none –"], ...pool.filter((s) => s.uid !== u.supervisorId).map((s) => [s.uid, s.name])])}</div>` : '<span class="muted small">—</span>'}</td>
+      <td>${self ? '<span class="muted small">—</span>' : mselBtn("mgr:" + u.uid, managersOf(u.uid))}</td>
       <td>${self ? "" : `<button class="secondary small-btn" data-uact="remove" data-id="${u.uid}">Remove access</button>`}</td>
     </tr>`;
   }).join("");

@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="apple-touch-icon.png?v=2" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=9" />
+  <link rel="stylesheet" href="style.css?v=10" />
 </head>
 <body>
   <div class="bg-orbs"><span></span><span></span><span></span></div>
@@ -211,7 +211,7 @@
         <label>Task type <select id="tType"><option value="">One-time</option><option>Daily</option><option>Weekly</option><option>Monthly</option></select></label>
         <label id="tEstWrap" class="hidden">Estimated time <input id="tEst" placeholder="e.g. 2h or 30m" /></label>
       </div>
-      <label>Assign to <select id="tAssignee" required></select></label>
+      <label>Assign to <button type="button" id="tAssigneeBtn" class="msel-btn msel-wide"></button></label>
       <div class="row">
         <label>Priority <select id="tPriority"><option>High</option><option selected>Medium</option><option>Low</option></select></label>
         <label>Due date <input type="date" id="tDue" /></label>
@@ -292,6 +292,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script type="module" src="app.js?v=12"></script>
+  <script type="module" src="app.js?v=13"></script>
 </body>
 </html>

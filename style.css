@@ -308,3 +308,21 @@ tr.ongoing td { background: #faf7ff; }
 .tm-start { font-size: 11px; color: var(--muted); white-space: nowrap; }
 .od-wrap { margin-top: 4px; }
 @media (max-width: 720px) { .tm { align-items: flex-end; } }
+
+/* checkbox multi-select */
+.msel-btn { display:inline-flex; align-items:center; gap:6px; max-width:170px; padding:5px 10px; border:1px solid #e3e5ef; border-radius:8px;
+  background:#fff; font:inherit; font-size:13px; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:inherit; box-shadow:none; }
+.msel-btn:hover { border-color:#b9b2f5; }
+.msel-btn.msel-wide { max-width:none; width:100%; justify-content:space-between; padding:9px 12px; }
+.msel-more { background:#efeafe; color:#6b4ee6; border-radius:999px; padding:1px 7px; font-size:11px; font-weight:600; }
+.msel-caret { color:#8a7cf0; font-size:10px; margin-left:auto; }
+.msel-pop { z-index:9999; width:260px; max-height:320px; overflow:auto; background:#fff; border:1px solid #e3e5ef; border-radius:10px;
+  box-shadow:0 12px 32px rgba(40,30,90,.18); padding:6px; }
+.msel-search { width:100%; box-sizing:border-box; padding:7px 9px; border:1px solid #e3e5ef; border-radius:7px; margin-bottom:4px; font:inherit; font-size:13px; }
+.msel-item { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; cursor:pointer; font-size:13px; font-weight:400; margin:0; }
+.msel-item:hover { background:#f5f3ff; }
+.msel-item input { width:auto; margin:0; accent-color:#6b4ee6; }
+.msel-item.hidden { display:none; }
+dialog { overflow: visible; }
+.msel-pop .msel-item { flex-direction: row; flex: none; gap: 8px; font-size: 13px; color: var(--ink); text-align: left; }
+.msel-pop .msel-item span { flex: 1; }
