@@ -2,12 +2,24 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ---------- who am I ----------
     function signedIn()  { return request.auth != null; }
-    function myRole()    { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role; }
+    function meDoc()     { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function myRole()    { return meDoc().role; }
+    function myTeam()    { return meDoc().get('teamId', 'arsalan'); }
     function isSenior()  { return signedIn() && myRole() == 'senior'; }
     function isSup()     { return signedIn() && myRole() == 'supervisor'; }
     function isStaff()   { return isSenior() || isSup(); }
     function isActive()  { return signedIn() && myRole() in ['senior', 'supervisor', 'member']; }
+    // The tool owner (Arsalan) sees and manages every team. Set owner = true on his users doc in the console.
+    function isOwner()   { return isSenior() && meDoc().get('owner', false) == true; }
+
+    // ---------- teams ----------
+    function teamExists(t) { return t is string && exists(/databases/$(database)/documents/teams/$(t)); }
+    function sameTeam(d)   { return d.teamId == myTeam(); }
+    // owner may write into any existing team, everyone else only into their own
+    function writesTeam()  { return (isOwner() && teamExists(request.resource.data.teamId)) || sameTeam(request.resource.data); }
+
     function myEmail()   { return request.auth.token.email.lower(); }
     function invitePath() { return /databases/$(database)/documents/invites/$(myEmail()); }
     function matchesInvite() {
@@ -16,41 +28,63 @@ service cloud.firestore {
         && request.resource.data.email.lower() == myEmail()
         && request.resource.data.role == get(invitePath()).data.role
         && request.resource.data.designation == get(invitePath()).data.designation
-        && request.resource.data.supervisorId == get(invitePath()).data.supervisorId;
+        && request.resource.data.supervisorId == get(invitePath()).data.supervisorId
+        && request.resource.data.teamId == get(invitePath()).data.teamId;
     }
     function cleanPending() {
       return request.resource.data.role == 'pending'
         && request.resource.data.designation == ''
         && request.resource.data.supervisorId == ''
-        && request.resource.data.email.lower() == myEmail();
+        && request.resource.data.email.lower() == myEmail()
+        && teamExists(request.resource.data.teamId);
+    }
+
+    // Team names are public so the sign-up form can list them.
+    match /teams/{tid} {
+      allow read: if true;
+      allow create, update: if isOwner()
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 60;
+      allow delete: if isOwner() && tid != 'arsalan';
     }
 
     match /users/{uid} {
-      allow read: if isActive() || (signedIn() && request.auth.uid == uid);
+      allow read: if isOwner()
+        || (signedIn() && request.auth.uid == uid)
+        || (isActive() && sameTeam(resource.data));
       allow create: if signedIn() && request.auth.uid == uid
         && (cleanPending() || matchesInvite())
-        && request.resource.data.keys().hasOnly(['name', 'email', 'role', 'supervisorId', 'phone', 'employeeId', 'designation', 'doj', 'photo', 'createdAt']);
-      allow update: if isSenior()
+        && request.resource.data.keys().hasOnly(['name', 'email', 'role', 'supervisorId', 'phone', 'employeeId', 'designation', 'doj', 'photo', 'createdAt', 'teamId']);
+      allow update: if isOwner()
+        || (isSenior() && sameTeam(resource.data)
+            && resource.data.get('owner', false) != true
+            && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['owner', 'teamId']))
         || (isActive() && request.auth.uid == uid
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'phone', 'photo']));
-      allow delete: if isSenior();
+      allow delete: if isOwner()
+        || (isSenior() && sameTeam(resource.data) && resource.data.get('owner', false) != true);
     }
 
     match /invites/{em} {
-      allow read: if isSenior() || (signedIn() && myEmail() == em);
-      allow create, update: if isSenior();
-      allow delete: if isSenior() || (signedIn() && myEmail() == em);
+      allow read: if isOwner() || (isSenior() && sameTeam(resource.data)) || (signedIn() && myEmail() == em);
+      allow create: if isSenior() && writesTeam();
+      allow update: if isOwner() || (isSenior() && sameTeam(resource.data) && sameTeam(request.resource.data));
+      allow delete: if isOwner() || (isSenior() && sameTeam(resource.data)) || (signedIn() && myEmail() == em);
     }
 
     match /projects/{pid} {
-      allow read: if isActive();
-      allow create, update: if isStaff();
-      allow delete: if isSenior();
+      allow read: if isOwner() || (isActive() && sameTeam(resource.data));
+      allow create: if isStaff() && writesTeam();
+      allow update: if isOwner() || (isStaff() && sameTeam(resource.data) && sameTeam(request.resource.data));
+      allow delete: if isOwner() || (isSenior() && sameTeam(resource.data));
     }
 
     match /projectDetails/{pid} {
-      allow read, create, update: if isStaff();
-      allow delete: if isSenior();
+      allow read: if isOwner() || (isStaff() && sameTeam(resource.data));
+      allow create: if isStaff() && writesTeam();
+      allow update: if isOwner() || (isStaff() && sameTeam(resource.data) && sameTeam(request.resource.data));
+      allow delete: if isOwner() || (isSenior() && sameTeam(resource.data));
     }
 
     match /tasks/{tid} {
@@ -61,26 +95,30 @@ service cloud.firestore {
           || get(/databases/$(database)/documents/users/$(aid)).data.get('coSupervisorId', '') == request.auth.uid
           || request.auth.uid in get(/databases/$(database)/documents/users/$(aid)).data.get('managerIds', []);
       }
-      allow read: if isSenior()
+      function mine(d) { return d.assigneeId == request.auth.uid || request.auth.uid in d.get('assigneeIds', []); }
+
+      allow read: if isOwner()
+        || (isSenior() && sameTeam(resource.data))
         || (isSup() && mgr(resource.data))
-        || (isActive() && (resource.data.assigneeId == request.auth.uid
-            || request.auth.uid in resource.data.get('assigneeIds', [])));
+        || (isActive() && mine(resource.data));
 
       allow create: if isStaff()
         && request.resource.data.assignedById == request.auth.uid
         && request.resource.data.status == 'Not Started'
+        && writesTeam()
         && (isSenior() || (mgr(request.resource.data) && myOfficer(request.resource.data.assigneeId)));
 
-      allow update: if isSenior()
+      allow update: if isOwner()
+        || (isSenior() && sameTeam(resource.data) && sameTeam(request.resource.data))
         || (isSup() && mgr(resource.data) && mgr(request.resource.data)
-            && myOfficer(request.resource.data.assigneeId))
-        || (isActive() && (resource.data.assigneeId == request.auth.uid
-                || request.auth.uid in resource.data.get('assigneeIds', []))
+            && myOfficer(request.resource.data.assigneeId)
+            && request.resource.data.get('teamId', '') == resource.data.get('teamId', ''))
+        || (isActive() && mine(resource.data)
             && request.resource.data.diff(resource.data).affectedKeys()
                  .hasOnly(['status', 'notes', 'startedAt', 'completedAt', 'workMs',
                            'lastResumeAt', 'history', 'updatedAt']));
 
-      allow delete: if isSenior() || (isSup() && mgr(resource.data));
+      allow delete: if isOwner() || (isSenior() && sameTeam(resource.data)) || (isSup() && mgr(resource.data));
     }
   }
 }

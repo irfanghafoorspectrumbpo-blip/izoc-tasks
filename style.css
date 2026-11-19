@@ -326,3 +326,9 @@ tr.ongoing td { background: #faf7ff; }
 dialog { overflow: visible; }
 .msel-pop .msel-item { flex-direction: row; flex: none; gap: 8px; font-size: 13px; color: var(--ink); text-align: left; }
 .msel-pop .msel-item span { flex: 1; }
+
+/* ===== v11: team switcher (owner only) ===== */
+.team-switch select { min-width: 170px; padding: 8px 12px; border-radius: 999px; font-weight: 600; font-size: 13px;
+  border: 1px solid var(--line); background: linear-gradient(180deg, #fff, #f1f2fa); color: var(--ink);
+  box-shadow: 0 1px 0 #fff inset, 0 3px 0 #d7dbec, 0 8px 14px -8px rgba(60,50,140,.35); cursor: pointer; }
+@media (max-width: 720px) { .team-switch select { min-width: 130px; } }

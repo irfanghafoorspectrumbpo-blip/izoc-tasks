@@ -1,4 +1,4 @@
-// Team Arsalan – Task Tracker
+// Team Arsalan – Task Tracker (multi-team)
 // Plain JavaScript + Firebase (Auth + Firestore). No build step needed.
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
@@ -9,7 +9,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, query, where,
-  onSnapshot, serverTimestamp, Timestamp, arrayUnion
+  onSnapshot, serverTimestamp, Timestamp, arrayUnion, getDocs
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -27,11 +27,16 @@ const db = getFirestore(app);
 
 // ---------- state ----------
 let me = null;            // { uid, name, email, role, supervisorId }
-let users = {};           // uid -> user
-let projects = {};        // id -> project
-let tasks = {};           // id -> task
-let projectDetails = {};  // id -> business details (staff only)
-let invites = {};         // email -> pending invite (admin only)
+let users = {};           // uid -> user (current team view)
+let projects = {};        // id -> project (current team view)
+let tasks = {};           // id -> task (current team view)
+let projectDetails = {};  // id -> business details (staff only, current team view)
+let invites = {};         // email -> pending invite (admin only, current team view)
+// raw data as loaded (owner loads every team; everyone else only their own team)
+let allUsers = {}, allProjects = {}, allTasks = {}, allDetails = {}, allInvites = {};
+let teams = {};           // teamId -> { name }
+const HOME_TEAM = "arsalan";     // Arsalan's own team (existing data belongs here)
+let viewTeam = HOME_TEAM;        // team currently shown
 let unsubs = [];
 let editingTaskId = null;
 let signUpMode = false;
@@ -47,6 +52,9 @@ let currentTab = "tasks";
 const isSenior = () => me?.role === "senior";
 const isSup = () => me?.role === "supervisor";
 const isStaff = () => isSenior() || isSup();
+const isOwner = () => isSenior() && me?.owner === true;
+const teamOf = (x) => x?.teamId || HOME_TEAM;
+const teamName = (id) => teams[id]?.name || (id === HOME_TEAM ? "Team Arsalan" : "Team");
 
 function toast(msg) {
   const t = $("toast"); t.textContent = msg; t.classList.remove("hidden");
@@ -80,7 +88,7 @@ function isOverdue(t) {
   return Date.now() > end.getTime();
 }
 const statusClass = (s) => "s-" + String(s).toLowerCase().replace(/\s+/g, "-");
-const userName = (uid) => users[uid]?.name || "(unknown)";
+const userName = (uid) => allUsers[uid]?.name || users[uid]?.name || "(unknown)";
 const shortId = (id) => "T-" + id.slice(0, 5).toUpperCase();
 const stLabel = (s) => (s === "Not Started" ? "Assigned" : s);
 const isOngoing = (t) => !!t?.recurrence;
@@ -153,7 +161,7 @@ async function saveField(kind, id, field, value, type) {
   if (type === "number") value = value === "" ? null : Number(value);
   if (kind === "task") return saveTaskField(tasks[id], field, value);
   if (kind === "proj") {
-    const upd = { [field]: value, updatedAt: serverTimestamp(), updatedBy: me.uid };
+    const upd = { [field]: value, updatedAt: serverTimestamp(), updatedBy: me.uid, teamId: teamOf(projects[id]) };
     if (field === "clientName" && value) {
       const p = projects[id];
       const n = Object.values(projects).filter((x) => x.id !== id && x.active !== false && clientKey(projectDetails[x.id]?.clientName) === clientKey(value)).length;
@@ -204,11 +212,22 @@ $("toggleAuth").onclick = (e) => {
   $("authName").required = signUpMode;
   $("authPhone").classList.toggle("hidden", !signUpMode);
   $("authEmpId").classList.toggle("hidden", !signUpMode);
+  $("authTeam").classList.toggle("hidden", !signUpMode);
+  $("authTeam").required = signUpMode;
+  if (signUpMode) loadSignupTeams();
   $("authBtn").textContent = signUpMode ? "Create account" : "Sign in";
   $("authSubtitle").textContent = signUpMode ? "Create your account" : "Sign in to continue";
   $("toggleAuth").textContent = signUpMode ? "Have an account? Sign in" : "New here? Create an account";
   $("authMsg").textContent = "";
 };
+async function loadSignupTeams() {
+  try {
+    const s = await getDocs(collection(db, "teams"));
+    const list = []; s.forEach((d) => list.push([d.id, d.data().name || d.id]));
+    list.sort((a, b) => a[1].localeCompare(b[1]));
+    setOptions($("authTeam"), list, "Select your team");
+  } catch (err) { console.warn(err); }
+}
 $("forgotPass").onclick = async (e) => {
   e.preventDefault();
   const email = $("authEmail").value.trim();
@@ -223,11 +242,13 @@ $("authForm").onsubmit = async (e) => {
   try {
     if (signUpMode) {
       const name = $("authName").value.trim();
+      const teamId = $("authTeam").value;
+      if (!teamId) { $("authMsg").textContent = "Please select your team."; $("authBtn").disabled = false; return; }
       const cred = await createUserWithEmailAndPassword(auth, email, pass);
       await updateProfile(cred.user, { displayName: name });
       await setDoc(doc(db, "users", cred.user.uid), {
         name, email, role: "pending", supervisorId: "", phone: $("authPhone").value.trim(),
-        employeeId: $("authEmpId").value.trim(), designation: "", createdAt: serverTimestamp()
+        employeeId: $("authEmpId").value.trim(), designation: "", teamId, createdAt: serverTimestamp()
       });
       await loadMe(cred.user);
     } else {
@@ -255,7 +276,7 @@ $("completeForm").onsubmit = async (e) => {
     await setDoc(doc(db, "users", user.uid), {
       name, email: user.email, role: inviteData.role, designation: inviteData.designation,
       supervisorId: inviteData.supervisorId || "", phone: $("cPhone").value.trim(),
-      employeeId: $("cEmpId").value.trim(), doj: inviteData.doj || "", createdAt: serverTimestamp()
+      employeeId: $("cEmpId").value.trim(), doj: inviteData.doj || "", teamId: teamOf(inviteData), createdAt: serverTimestamp()
     });
     await deleteDoc(doc(db, "invites", String(user.email).toLowerCase())).catch(() => {});
     inviteData = null;
@@ -280,6 +301,7 @@ let inviteData = null;
 onAuthStateChanged(auth, async (user) => {
   await inviteLinkPromise;
   unsubs.forEach((u) => u()); unsubs = []; tasks = {}; users = {}; projects = {}; projectDetails = {}; invites = {};
+  allTasks = {}; allUsers = {}; allProjects = {}; allDetails = {}; allInvites = {}; teams = {}; fixed.clear();
   if (!user) { me = null; show("authScreen"); return; }
   await loadMe(user);
 });
@@ -304,47 +326,102 @@ async function loadMe(user) {
 // ---------- app ----------
 function startApp() {
   show("appScreen");
+  viewTeam = isOwner() ? (localStorage.getItem("izocViewTeam") || HOME_TEAM) : teamOf(me);
   renderMe();
   document.querySelectorAll(".staff-only").forEach((el) => el.classList.toggle("hidden", !isStaff()));
   document.querySelectorAll(".senior-only").forEach((el) => el.classList.toggle("hidden", !isSenior()));
+  $("teamSwitch").classList.toggle("hidden", !isOwner());
   switchTab("tasks");
 
-  unsubs.push(onSnapshot(collection(db, "users"), (s) => {
-    users = {}; s.forEach((d) => (users[d.id] = { uid: d.id, ...d.data() }));
-    if (users[me.uid]) me = { ...me, ...users[me.uid] };
-    renderMe(); scheduleRender();
-  }));
-  unsubs.push(onSnapshot(collection(db, "projects"), (s) => {
-    projects = {}; s.forEach((d) => (projects[d.id] = { id: d.id, ...d.data() }));
-    scheduleRender();
-  }));
+  const owner = isOwner(), myTeamId = teamOf(me);
+  // Owner loads every team; everyone else only their own team (must match the security rules).
+  const scoped = (name) => owner ? collection(db, name) : query(collection(db, name), where("teamId", "==", myTeamId));
+  const load = (name, keyed, setRaw) => onSnapshot(scoped(name), (s) => {
+    const m = {}; s.forEach((d) => (m[d.id] = keyed(d)));
+    setRaw(m); if (owner) backfill(name, m);
+    applyView(); scheduleRender();
+  }, (err) => console.warn(name, err));
 
-  if (isSenior()) unsubs.push(onSnapshot(collection(db, "invites"), (s) => {
-    invites = {}; s.forEach((d) => (invites[d.id] = d.data())); scheduleRender();
+  unsubs.push(onSnapshot(collection(db, "teams"), (s) => {
+    teams = {}; s.forEach((d) => (teams[d.id] = { id: d.id, ...d.data() }));
+    if (owner && !teams[HOME_TEAM]) setDoc(doc(db, "teams", HOME_TEAM), { name: "Team Arsalan", createdAt: serverTimestamp() }).catch(() => {});
+    if (owner && viewTeam !== HOME_TEAM && Object.keys(teams).length && !teams[viewTeam]) setView(HOME_TEAM);
+    renderTeamSwitch(); renderMe();
   }));
-  if (isStaff()) unsubs.push(onSnapshot(collection(db, "projectDetails"), (s) => {
-    projectDetails = {}; s.forEach((d) => (projectDetails[d.id] = d.data()));
-    scheduleRender();
+  unsubs.push(load("users", (d) => ({ uid: d.id, ...d.data() }), (m) => {
+    allUsers = m;
+    if (allUsers[me.uid]) me = { ...me, ...allUsers[me.uid] };
+    renderMe();
   }));
+  unsubs.push(load("projects", (d) => ({ id: d.id, ...d.data() }), (m) => (allProjects = m)));
+  if (isSenior()) unsubs.push(load("invites", (d) => d.data(), (m) => (allInvites = m)));
+  if (isStaff()) unsubs.push(load("projectDetails", (d) => d.data(), (m) => (allDetails = m)));
 
   // Task queries must match the security rules.
   const col = collection(db, "tasks");
-  const qs = isSenior()
+  const qs = owner
     ? [col]
-    : isSup()
-      ? [query(col, where("supervisorId", "==", me.uid)), query(col, where("managerIds", "array-contains", me.uid)), query(col, where("assigneeId", "==", me.uid)), query(col, where("assigneeIds", "array-contains", me.uid))]
-      : [query(col, where("assigneeId", "==", me.uid)), query(col, where("assigneeIds", "array-contains", me.uid))];
+    : isSenior()
+      ? [query(col, where("teamId", "==", myTeamId))]
+      : isSup()
+        ? [query(col, where("supervisorId", "==", me.uid)), query(col, where("managerIds", "array-contains", me.uid)), query(col, where("assigneeId", "==", me.uid)), query(col, where("assigneeIds", "array-contains", me.uid))]
+        : [query(col, where("assigneeId", "==", me.uid)), query(col, where("assigneeIds", "array-contains", me.uid))];
   const buckets = qs.map(() => ({}));
   setupNotifications();
   qs.forEach((q, i) => unsubs.push(onSnapshot(q, (s) => {
     buckets[i] = {}; s.forEach((d) => (buckets[i][d.id] = { id: d.id, ...d.data() }));
     notifyNewAssignments(s);
-    tasks = Object.assign({}, ...buckets);
-    scheduleRender();
+    allTasks = Object.assign({}, ...buckets);
+    if (owner) backfill("tasks", allTasks);
+    applyView(); scheduleRender();
   }, (err) => toast(niceErr(err)))));
 
   // refresh running timers every minute
   unsubs.push(((h) => () => clearInterval(h))(setInterval(() => { if (!inlineActive && !document.activeElement?.classList?.contains("inl")) renderTasks(); }, 60000)));
+}
+
+// ---------- teams: view filter, switcher, one-time tagging of old data ----------
+function applyView() {
+  const pick = (m) => Object.fromEntries(Object.entries(m).filter(([, x]) => teamOf(x) === viewTeam));
+  users = pick(allUsers); projects = pick(allProjects); tasks = pick(allTasks);
+  projectDetails = pick(allDetails); invites = pick(allInvites);
+}
+function setView(id) {
+  viewTeam = id; localStorage.setItem("izocViewTeam", id);
+  ["fProject", "fPerson"].forEach((f) => ($(f).value = ""));
+  projSynced = false; mgrSyncKey = "";
+  applyView(); renderTeamSwitch(); renderMe(); renderAll();
+}
+function renderTeamSwitch() {
+  const name = teamName(viewTeam);
+  $("brandName").textContent = name; document.title = name;
+  if (!isOwner()) return;
+  const list = Object.values(teams).sort((a, b) => (a.id === HOME_TEAM ? -1 : b.id === HOME_TEAM ? 1 : (a.name || "").localeCompare(b.name || "")));
+  $("teamSel").innerHTML = list.map((t) => `<option value="${esc(t.id)}" ${t.id === viewTeam ? "selected" : ""}>${esc(t.name || t.id)}</option>`).join("")
+    + `<option value="__new">+ New team…</option><option value="__rename">✎ Rename this team…</option>`;
+}
+$("teamSel").onchange = async (e) => {
+  const v = e.target.value;
+  try {
+    if (v === "__new") {
+      const name = (prompt("New team name (e.g. Team Abdul Basit):") || "").trim().slice(0, 60);
+      if (name) { const r = await addDoc(collection(db, "teams"), { name, createdBy: me.uid, createdAt: serverTimestamp() }); setView(r.id);
+        toast(`${name} created. Open the Team tab to invite its Senior Supervisor.`); return; }
+    } else if (v === "__rename") {
+      const name = (prompt("Team name:", teamName(viewTeam)) || "").trim().slice(0, 60);
+      if (name) { await setDoc(doc(db, "teams", viewTeam), { name }, { merge: true }); toast("Team renamed"); }
+    } else { setView(v); return; }
+  } catch (err) { toast(niceErr(err)); }
+  renderTeamSwitch();
+};
+// Old records were made before teams existed: the owner tags them as Team Arsalan once.
+const fixed = new Set();
+function backfill(name, m) {
+  Object.entries(m).forEach(([id, x]) => {
+    if (x.teamId || fixed.has(name + "/" + id)) return;
+    fixed.add(name + "/" + id);
+    updateDoc(doc(db, name, id), { teamId: HOME_TEAM }).catch((err) => console.warn("tag", name, id, err));
+  });
 }
 
 document.querySelectorAll(".tab").forEach((b) => (b.onclick = () => switchTab(b.dataset.tab)));
@@ -722,7 +799,7 @@ $("taskForm").onsubmit = async (e) => {
       toast("Task updated");
     } else {
       await addDoc(collection(db, "tasks"), {
-        ...data, status: "Not Started", assignedById: me.uid, assignedAt: serverTimestamp(),
+        ...data, teamId: viewTeam, status: "Not Started", assignedById: me.uid, assignedAt: serverTimestamp(),
         startedAt: null, completedAt: null, workMs: 0, lastResumeAt: null,
         history: [{ at: Timestamp.now(), by: me.uid, action: `Assigned to ${names}` }]
       });
@@ -821,12 +898,13 @@ $("projectForm").onsubmit = async (e) => {
     clientName: client, clientEmail: $("pClientEmail").value.trim(), llcName: $("pLlc").value.trim(),
     clientId: $("pClientId").value.trim(), doj: $("pDoj").value, numProjects: $("pNum").value === "" ? null : Number($("pNum").value),
     projectType: $("pType").value, revenue: rev === "" ? null : Number(rev), managerId: $("pManager").value,
+    teamId: editingProjectId ? teamOf(projects[editingProjectId]) : viewTeam,
     updatedAt: serverTimestamp(), updatedBy: me.uid
   };
   try {
     let id = editingProjectId;
     if (id) await updateDoc(doc(db, "projects", id), { name });
-    else id = (await addDoc(collection(db, "projects"), { name, active: true, createdBy: me.uid, createdAt: serverTimestamp() })).id;
+    else id = (await addDoc(collection(db, "projects"), { name, active: true, teamId: viewTeam, createdBy: me.uid, createdAt: serverTimestamp() })).id;
     await setDoc(doc(db, "projectDetails", id), details, { merge: true });
     $("projectModal").close(); toast(editingProjectId ? "Project updated" : "Project added");
   } catch (err) { toast(niceErr(err)); }
@@ -982,10 +1060,10 @@ $("inviteForm").onsubmit = async (e) => {
   const email = $("iEmail").value.trim().toLowerCase(), designation = $("iDesig").value, role = $("iRole").value;
   const supervisorId = designation === "Ecommerce Officer" ? $("iSup").value : "";
   if (!email || !designation || !role) return;
-  if (Object.values(users).some((u) => String(u.email).toLowerCase() === email)) { toast("This email already has an account."); return; }
+  if (Object.values(allUsers).some((u) => String(u.email).toLowerCase() === email)) { toast("This email already has an account."); return; }
   $("inviteBtn").disabled = true;
   try {
-    await setDoc(doc(db, "invites", email), { email, designation, role, supervisorId, doj: $("iDoj").value || "", invitedBy: me.uid, createdAt: serverTimestamp() });
+    await setDoc(doc(db, "invites", email), { email, designation, role, supervisorId, teamId: viewTeam, doj: $("iDoj").value || "", invitedBy: me.uid, createdAt: serverTimestamp() });
     await sendInvite(email);
     $("iEmail").value = ""; $("iDoj").value = ""; toast(`Invite sent to ${email}`);
   } catch (err) {
@@ -1039,7 +1117,7 @@ $("exportBtn").onclick = () => {
   const csv = rows.map((r) => r.map((c) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n");
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv" }));
-  a.download = `team-arsalan-tasks-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `${teamName(viewTeam).toLowerCase().replace(/[^a-z0-9]+/g, "-")}-tasks-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
 };
 
@@ -1132,7 +1210,7 @@ function notifyNewAssignments(snap) {
     const n = new Notification(title, { body, icon: "favicon.png?v=2", tag, requireInteraction: false });
     n.onclick = () => { window.focus(); switchTab("tasks"); n.close(); };
   };
-  if (fresh.length > 3) show("Team Arsalan", `You have ${fresh.length} new tasks assigned.`, "bulk");
+  if (fresh.length > 3) show(teamName(viewTeam), `You have ${fresh.length} new tasks assigned.`, "bulk");
   else fresh.forEach((t) => show("New task assigned", `${t.title}\n${projects[t.projectId]?.name || t.projectName || ""} · from ${userName(t.assignedById)}${t.recurrence ? " · Ongoing " + t.recurrence : t.due ? " · due " + t.due : ""}`, t.id));
 }
 
