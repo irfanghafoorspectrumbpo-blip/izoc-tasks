@@ -306,8 +306,8 @@ tr.ongoing td { background: #faf7ff; }
 .tm > button, .tm > .tm-btns, .tm > .badge { margin-bottom: 6px; }
 .tm-btns { display: flex; gap: 5px; }
 .tm-btns .btn-complete, .tm-btns .btn-pause { padding: 5px 8px; font-size: 11.5px; border-radius: 9px; min-width: 74px; text-align: center; }
-.btn-pause { font-weight: 700; border: 0; color: #fff; cursor: pointer; white-space: nowrap; background: linear-gradient(180deg, #8b8fa3, #636779); box-shadow: 0 3px 0 #464959, 0 8px 14px -6px rgba(99,103,121,.6); }
-.tm .live-timer { font-size: 13px; line-height: 1.2; }
+.btn-pause { font-weight: 700; border: 0; cursor: pointer; white-space: nowrap; color: #4a3500; background: linear-gradient(180deg, #ffd84d, #f5b800); box-shadow: 0 3px 0 #b88a00, 0 8px 14px -6px rgba(245,184,0,.6); }
+.tm .live-timer { font-size: 13px; line-height: 1.2; color: #a10f0f; }
 .tm .live-timer.paused { color: var(--muted); }
 .tm-start { font-size: 11px; color: var(--muted); white-space: nowrap; }
 .od-wrap { margin-top: 4px; }

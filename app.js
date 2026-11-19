@@ -613,7 +613,7 @@ function timerCell(t, mine, canManage) {
   const started = t.startedAt ? `<div class="tm-start">Started ${fmtDT(t.startedAt)}</div>` : "";
   if (t.status === "In Progress") {
     const base = t.workMs || 0, res = t.lastResumeAt ? toDate(t.lastResumeAt).getTime() : Date.now();
-    return `<div class="tm">${can ? `<div class="tm-btns"><button class="btn-complete" data-act="complete" data-id="${t.id}">✓ Complete</button><button class="btn-pause" data-act="hold" data-id="${t.id}" title="Pause the timer (break)">❚❚ Pause</button></div>` : `<span class="badge ${statusClass(t.status)}">In Progress</span>`}
+    return `<div class="tm">${can ? `<div class="tm-btns"><button class="btn-pause" data-act="hold" data-id="${t.id}" title="Pause the timer (break)">❚❚ Pause</button><button class="btn-complete" data-act="complete" data-id="${t.id}">✓ Complete</button></div>` : `<span class="badge ${statusClass(t.status)}">In Progress</span>`}
       <span class="live-timer" data-base="${base}" data-res="${res}">${clock(base + Date.now() - res)}</span>${started}</div>`;
   }
   const paused = t.workMs ? `<span class="live-timer paused">${clock(t.workMs)}</span>` : "";
