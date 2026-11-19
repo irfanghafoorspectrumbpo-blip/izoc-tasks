@@ -12,46 +12,47 @@ service cloud.firestore {
     function invitePath() { return /databases/$(database)/documents/invites/$(myEmail()); }
     function matchesInvite() {
       return exists(invitePath())
+        && request.auth.token.email_verified == true
+        && request.resource.data.email.lower() == myEmail()
         && request.resource.data.role == get(invitePath()).data.role
         && request.resource.data.designation == get(invitePath()).data.designation
         && request.resource.data.supervisorId == get(invitePath()).data.supervisorId;
     }
+    function cleanPending() {
+      return request.resource.data.role == 'pending'
+        && request.resource.data.designation == ''
+        && request.resource.data.supervisorId == ''
+        && request.resource.data.email.lower() == myEmail();
+    }
 
-    // People: anyone can create their own profile, but only as "pending".
-    // Only the Senior Supervisor can approve, change roles, or set supervisors.
     match /users/{uid} {
       allow read: if isActive() || (signedIn() && request.auth.uid == uid);
       allow create: if signedIn() && request.auth.uid == uid
-        && (request.resource.data.role == 'pending' || matchesInvite())
+        && (cleanPending() || matchesInvite())
         && request.resource.data.keys().hasOnly(['name', 'email', 'role', 'supervisorId', 'phone', 'employeeId', 'designation', 'doj', 'photo', 'createdAt']);
-      // Senior manages everyone; each person can edit their own name, phone and profile photo.
       allow update: if isSenior()
         || (isActive() && request.auth.uid == uid
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'phone', 'photo']));
       allow delete: if isSenior();
     }
 
-    // Invites: only the Admin creates them; the invited person can read and remove their own.
     match /invites/{em} {
       allow read: if isSenior() || (signedIn() && myEmail() == em);
       allow create, update: if isSenior();
       allow delete: if isSenior() || (signedIn() && myEmail() == em);
     }
 
-    // Projects: everyone approved can see them; supervisors add/archive; senior deletes.
     match /projects/{pid} {
       allow read: if isActive();
       allow create, update: if isStaff();
       allow delete: if isSenior();
     }
 
-    // Project business details (client, brand, LLC, type, revenue): supervisors and senior only.
     match /projectDetails/{pid} {
       allow read, create, update: if isStaff();
       allow delete: if isSenior();
     }
 
-    // Tasks
     match /tasks/{tid} {
       function mgr(d) { return d.supervisorId == request.auth.uid || request.auth.uid in d.get('managerIds', []); }
       function myOfficer(aid) {
@@ -65,14 +66,11 @@ service cloud.firestore {
         || (isActive() && (resource.data.assigneeId == request.auth.uid
             || request.auth.uid in resource.data.get('assigneeIds', [])));
 
-      // Senior assigns to anyone; a supervisor only to the officers they manage (main or second manager).
       allow create: if isStaff()
         && request.resource.data.assignedById == request.auth.uid
         && request.resource.data.status == 'Not Started'
         && (isSenior() || (mgr(request.resource.data) && myOfficer(request.resource.data.assigneeId)));
 
-      // Senior edits anything; a supervisor edits their team's tasks;
-      // the person doing the task can only change status, timing and notes.
       allow update: if isSenior()
         || (isSup() && mgr(resource.data) && mgr(request.resource.data)
             && myOfficer(request.resource.data.assigneeId))
