@@ -1,4 +1,4 @@
-// Team Arsalan – Task Tracker (multi-team)
+// Team Desk – Task Tracker (multi-team)
 // Plain JavaScript + Firebase (Auth + Firestore). No build step needed.
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
