@@ -64,10 +64,26 @@ function show(screen) {
   ["authScreen", "pendingScreen", "inviteScreen", "appScreen"].forEach((s) => $(s).classList.toggle("hidden", s !== screen));
 }
 const toDate = (ts) => (ts?.toDate ? ts.toDate() : ts ? new Date(ts) : null);
+// All times in the app follow Amazon US (Pacific Time, PST/PDT)
+const TZ = "America/Los_Angeles";
+function tzOffsetMs(ms) { // how far Pacific wall-clock is from UTC at this instant
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: TZ, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - Math.floor(ms / 1000) * 1000;
+}
+function ptMs(dateStr, timeStr) { // "2026-11-20","23:59:59" Pacific -> epoch ms
+  const guess = new Date(dateStr + "T" + timeStr + "Z").getTime();
+  let ms = guess - tzOffsetMs(guess);
+  ms = guess - tzOffsetMs(ms);
+  return ms;
+}
+const ptDayEnd = (d) => ptMs(d, "23:59:59") + 999;
+const ptDayStart = (d) => ptMs(d, "00:00:00");
+const ptToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 function fmtDT(ts) {
   const d = toDate(ts); if (!d) return "";
-  return d.toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleString("en-US", { timeZone: TZ, day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) + " PT";
 }
+const fmtFull = (ts) => { const d = toDate(ts); return d ? d.toLocaleString("en-US", { timeZone: TZ }) + " PT" : ""; };
 function fmtDur(ms) {
   if (!ms || ms < 0) return "";
   const m = Math.round(ms / 60000);
@@ -84,15 +100,14 @@ function workMs(t) {
 }
 function isOverdue(t) {
   if (!t.due || t.status === "Completed" || isOngoing(t)) return false;
-  const end = new Date(t.due + "T23:59:59");
-  return Date.now() > end.getTime();
+  return Date.now() > ptDayEnd(t.due);
 }
 const statusClass = (s) => "s-" + String(s).toLowerCase().replace(/\s+/g, "-");
 const userName = (uid) => allUsers[uid]?.name || users[uid]?.name || "(unknown)";
 const shortId = (id) => "T-" + id.slice(0, 5).toUpperCase();
 const stLabel = (s) => (s === "Not Started" ? "Assigned" : s);
 const isOngoing = (t) => !!t?.recurrence;
-const fmtDay = (v) => { if (!v) return ""; const d = new Date(v + "T00:00:00"); return isNaN(d) ? esc(v) : d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" }); };
+const fmtDay = (v) => { if (!v) return ""; const d = new Date(v + "T12:00:00Z"); return isNaN(d) ? esc(v) : d.toLocaleDateString("en-US", { timeZone: "UTC", day: "2-digit", month: "short", year: "numeric" }); };
 const initials = (n) => String(n || "?").trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 const avatarHtml = (u, cls = "") => u?.photo
   ? `<span class="avatar ${cls}"><img src="${esc(u.photo)}" alt="" /></span>`
@@ -545,8 +560,8 @@ function projLabel(pid) {
 
 function filteredTasks(mode = "open") {
   const p = $("fProject").value, who = $("fPerson").value, st = mode === "open" ? $("fStatus").value : "";
-  const from = $("fFrom").value ? new Date($("fFrom").value + "T00:00:00") : null;
-  const to = $("fTo").value ? new Date($("fTo").value + "T23:59:59") : null;
+  const from = $("fFrom").value ? new Date(ptDayStart($("fFrom").value)) : null;
+  const to = $("fTo").value ? new Date(ptDayEnd($("fTo").value)) : null;
   return Object.values(tasks).filter((t) => {
     if (p && t.projectId !== p) return false;
     if (who && !isAssignee(t, who)) return false;
@@ -632,7 +647,7 @@ function renderDone() {
   $("doneEmpty").textContent = q ? `No completed tasks match "${$("doneSearch").value.trim()}".` : "No completed tasks for these filters.";
   $("doneTable").querySelector("tbody").innerHTML = list.map((t) => {
     const canManage = canManageTask(t);
-    const late = t.due && toDate(t.completedAt) && toDate(t.completedAt) > new Date(t.due + "T23:59:59");
+    const late = t.due && toDate(t.completedAt) && toDate(t.completedAt).getTime() > ptDayEnd(t.due);
     return `<tr>
       <td>${shortId(t.id)}</td>
       <td class="title-cell"><b>${esc(t.title)}</b>${t.desc ? `<div class="desc">${esc(t.desc)}</div>` : ""}${t.notes ? `<div class="desc">📝 ${esc(t.notes)}</div>` : ""}</td>
@@ -1111,13 +1126,13 @@ $("exportBtn").onclick = () => {
   filteredTasks(currentTab === "completed" ? "done" : "open").forEach((t) => rows.push([
     shortId(t.id), t.title, t.desc, projects[t.projectId]?.name || t.projectName, assigneesOf(t).map(userName).join(", "),
     userName(t.assignedById), userName(t.supervisorId), t.priority, t.due, stLabel(t.status) + (isOngoing(t) ? ` (Ongoing · ${t.recurrence})` : ""), isOverdue(t) ? "Yes" : "No",
-    toDate(t.assignedAt)?.toLocaleString() || "", toDate(t.startedAt)?.toLocaleString() || "",
-    toDate(t.completedAt)?.toLocaleString() || "", isOngoing(t) ? `Est. ${t.estimate || ""}` : (workMs(t) / 3600000).toFixed(2), t.notes
+    fmtFull(t.assignedAt), fmtFull(t.startedAt),
+    fmtFull(t.completedAt), isOngoing(t) ? `Est. ${t.estimate || ""}` : (workMs(t) / 3600000).toFixed(2), t.notes
   ]));
   const csv = rows.map((r) => r.map((c) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n");
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv" }));
-  a.download = `${teamName(viewTeam).toLowerCase().replace(/[^a-z0-9]+/g, "-")}-tasks-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `${teamName(viewTeam).toLowerCase().replace(/[^a-z0-9]+/g, "-")}-tasks-${ptToday()}.csv`;
   a.click();
 };
 
